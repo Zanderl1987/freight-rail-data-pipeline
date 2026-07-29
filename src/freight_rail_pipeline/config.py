@@ -18,6 +18,10 @@ class PipelineConfig:
     log_dir: Path = Path(
         os.getenv("FREIGHT_PIPELINE_LOG_DIR", "logs")
     )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "output_dir", Path(self.output_dir))
+        object.__setattr__(self, "log_dir", Path(self.log_dir))
     log_level: str = os.getenv("FREIGHT_PIPELINE_LOG_LEVEL", "INFO")
     log_json: bool = os.getenv("FREIGHT_PIPELINE_LOG_JSON", "false").lower() == "true"
 

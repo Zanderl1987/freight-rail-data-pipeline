@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,16 @@ from freight_rail_pipeline.pipeline import FreightPipeline
 from freight_rail_pipeline.sources.base import SourceResult
 
 
+def _cleanup_loggers() -> None:
+    root = logging.getLogger("freight_rail_pipeline")
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
+
+
 class TestFreightPipeline:
     _test_dir = Path("tests/_test_pipeline")
 
@@ -20,12 +31,14 @@ class TestFreightPipeline:
 
     @classmethod
     def teardown_class(cls) -> None:
+        _cleanup_loggers()
         if cls._test_dir.exists():
-            shutil.rmtree(cls._test_dir)
+            shutil.rmtree(cls._test_dir, ignore_errors=True)
 
     def setup_method(self) -> None:
+        _cleanup_loggers()
         if self._test_dir.exists():
-            shutil.rmtree(self._test_dir)
+            shutil.rmtree(self._test_dir, ignore_errors=True)
         self._test_dir.mkdir(parents=True, exist_ok=True)
 
     def make_config(self) -> PipelineConfig:

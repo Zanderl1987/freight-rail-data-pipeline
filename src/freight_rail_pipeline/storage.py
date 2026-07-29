@@ -9,6 +9,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pathlib import Path
 from .config import PipelineConfig
 from .models.schemas import (
     OceanFreightRate,
@@ -157,7 +158,7 @@ class StorageWriter:
             if d.get("raw_record") is not None:
                 import json
                 d["raw_record"] = json.dumps(d["raw_record"], default=str)
-            d["ingested_at"] = d.get("ingested_at", pd.Timestamp.utcnow())
+            d["ingested_at"] = d.get("ingested_at", pd.Timestamp.now("UTC"))
             serialized.append(d)
 
         df = pd.DataFrame(serialized)
@@ -186,9 +187,18 @@ class StorageWriter:
         summary_file = self.output_dir / "pipeline_runs" / f"{summary.run_id}.json"
         summary_file.parent.mkdir(parents=True, exist_ok=True)
         import json
+        from datetime import date, datetime
+
+        def serialize(obj: object) -> str:
+            if isinstance(obj, (date, datetime)):
+                return obj.isoformat()
+            return str(obj)
 
         with open(summary_file, "w") as f:
-            f.write(summary.model_dump_json(indent=2, default=str))
+            json.dump(
+                json.loads(summary.model_dump_json()),
+                f, indent=2, default=serialize,
+            )
         log.info("Wrote pipeline summary to %s", summary_file)
         self.written_paths.append(str(summary_file))
 

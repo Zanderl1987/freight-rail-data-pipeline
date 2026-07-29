@@ -23,7 +23,7 @@ class TestUSDAgTransportSource:
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
     def test_fetch_carloadings_returns_records(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
         mock_client = MagicMock()
-        mock_socrata.return_value.__enter__.return_value = mock_client
+        mock_socrata.return_value = mock_client
         mock_client.get.return_value = [
             {"railroad": "BNSF", "commodity": "Grain", "carloads": "1500"},
             {"railroad": "UP", "commodity": "Coal", "carloads": "3200"},
@@ -37,7 +37,7 @@ class TestUSDAgTransportSource:
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
     def test_fetch_handles_empty_response(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
         mock_client = MagicMock()
-        mock_socrata.return_value.__enter__.return_value = mock_client
+        mock_socrata.return_value = mock_client
         mock_client.get.return_value = []
 
         result = source.fetch()

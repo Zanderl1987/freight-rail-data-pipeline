@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 class PipelineResult:
     run_id: str
     success: bool
-    total_records: int
+    total_records: int = 0
     source_results: dict[str, int] = field(default_factory=dict)
     failed_sources: list[str] = field(default_factory=list)
     output_paths: list[str] = field(default_factory=list)
