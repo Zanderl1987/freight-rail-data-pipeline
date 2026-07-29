@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "freight-rail-data-pipeline"
+version = "0.1.0"
+description = "Multi-source data pipeline for freight rail and ocean container shipping rates."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Zanderl1987"},
+]
+
+keywords = ["freight", "rail", "shipping", "data-pipeline", "supply-chain"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "requests>=2.31",
+    "pydantic>=2.5",
+    "pyarrow>=14.0",
+    "pandas>=2.1",
+    "sodapy>=2.2",
+    "python-dotenv>=1.0",
+    "click>=8.1",
+    "rich>=13.7",
+    "streamlit>=1.28",
+    "plotly>=5.18",
+    "httpx>=0.26",
+    "tenacity>=8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.12",
+    "responses>=0.25",
+    "black>=24.0",
+    "ruff>=0.1",
+    "mypy>=1.7",
+    "pre-commit>=3.5",
+]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.12",
+    "responses>=0.25",
+]
+
+[project.scripts]
+freight-pipe = "freight_rail_pipeline.reporting.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short --cov=freight_rail_pipeline"
+markers = [
+    "integration: marks tests that hit real APIs (skipped by default)",
+    "slow: marks slow tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "S"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
