@@ -1,25 +1,21 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from pydantic import BaseModel
 
-from pathlib import Path
 from .config import PipelineConfig
 from .models.schemas import (
-    OceanFreightRate,
     OceanFreightRateBatch,
     PipelineRunSummary,
-    RailCarloading,
     RailCarloadingBatch,
-    RailServiceMetric,
     RailServiceMetricBatch,
-    RailTariffRateBatch,
 )
 
 log = logging.getLogger(__name__)
@@ -30,10 +26,10 @@ def _partition_path(base: Path, source: str, table: str, dt: date) -> Path:
 
 
 def _pydantic_to_pyarrow(
-    records: list,
+    records: Sequence[BaseModel],
     schema: pa.Schema,
 ) -> pa.Table:
-    data: list[dict] = [r.model_dump(mode="python") for r in records]
+    data: list[dict[str, object]] = [r.model_dump(mode="python") for r in records]
     df = pd.DataFrame(data)
 
     for field in schema:
@@ -49,53 +45,59 @@ def _pydantic_to_pyarrow(
 
 def _schema_for_model(table_name: str) -> pa.Schema:
     schemas: dict[str, pa.Schema] = {
-        "rail_carloadings": pa.schema([
-            pa.field("source", pa.utf8()),
-            pa.field("snapshot_date", pa.date32()),
-            pa.field("railroad", pa.utf8()),
-            pa.field("commodity", pa.utf8()),
-            pa.field("carloads", pa.int64()),
-            pa.field("units", pa.utf8()),
-            pa.field("origin_region", pa.utf8(), nullable=True),
-            pa.field("destination_region", pa.utf8(), nullable=True),
-            pa.field("raw_record", pa.string(), nullable=True),
-            pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
-        ]),
-        "rail_service_metrics": pa.schema([
-            pa.field("source", pa.utf8()),
-            pa.field("snapshot_date", pa.date32()),
-            pa.field("railroad", pa.utf8()),
-            pa.field("metric_name", pa.utf8()),
-            pa.field("metric_value", pa.float64()),
-            pa.field("unit", pa.utf8()),
-            pa.field("region", pa.utf8(), nullable=True),
-            pa.field("raw_record", pa.string(), nullable=True),
-            pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
-        ]),
-        "ocean_freight_rates": pa.schema([
-            pa.field("source", pa.utf8()),
-            pa.field("snapshot_date", pa.date32()),
-            pa.field("route_code", pa.utf8()),
-            pa.field("route_description", pa.utf8()),
-            pa.field("origin_port", pa.utf8()),
-            pa.field("destination_port", pa.utf8()),
-            pa.field("trade_lane", pa.utf8()),
-            pa.field("container_type", pa.utf8()),
-            pa.field("rate_usd", pa.int64(), nullable=True),
-            pa.field("currency", pa.utf8()),
-            pa.field("rate_unit", pa.utf8()),
-            pa.field("region", pa.utf8(), nullable=True),
-            pa.field("raw_record", pa.string(), nullable=True),
-            pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
-        ]),
+        "rail_carloadings": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("railroad", pa.utf8()),
+                pa.field("commodity", pa.utf8()),
+                pa.field("carloads", pa.int64()),
+                pa.field("units", pa.utf8()),
+                pa.field("origin_region", pa.utf8(), nullable=True),
+                pa.field("destination_region", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
+        "rail_service_metrics": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("railroad", pa.utf8()),
+                pa.field("metric_name", pa.utf8()),
+                pa.field("metric_value", pa.float64()),
+                pa.field("unit", pa.utf8()),
+                pa.field("region", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
+        "ocean_freight_rates": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("route_code", pa.utf8()),
+                pa.field("route_description", pa.utf8()),
+                pa.field("origin_port", pa.utf8()),
+                pa.field("destination_port", pa.utf8()),
+                pa.field("trade_lane", pa.utf8()),
+                pa.field("container_type", pa.utf8()),
+                pa.field("rate_usd", pa.int64(), nullable=True),
+                pa.field("currency", pa.utf8()),
+                pa.field("rate_unit", pa.utf8()),
+                pa.field("region", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     return schemas.get(table_name, pa.schema([]))
 
 
-def _json_serialize_raw(records: list) -> list:
+def _json_serialize_raw(records: Sequence[BaseModel]) -> list[dict[str, object]]:
     import json
 
-    result = []
+    result: list[dict[str, object]] = []
     for r in records:
         d = r.model_dump(mode="python")
         if d.get("raw_record") is not None:
@@ -113,7 +115,7 @@ class StorageWriter:
     def write_carloadings(
         self,
         batch: RailCarloadingBatch,
-        dt: Optional[date] = None,
+        dt: date | None = None,
     ) -> int:
         if not batch.records:
             return 0
@@ -122,7 +124,7 @@ class StorageWriter:
     def write_service_metrics(
         self,
         batch: RailServiceMetricBatch,
-        dt: Optional[date] = None,
+        dt: date | None = None,
     ) -> int:
         if not batch.records:
             return 0
@@ -131,7 +133,7 @@ class StorageWriter:
     def write_ocean_rates(
         self,
         batch: OceanFreightRateBatch,
-        dt: Optional[date] = None,
+        dt: date | None = None,
     ) -> int:
         if not batch.records:
             return 0
@@ -140,13 +142,15 @@ class StorageWriter:
     def _write_table(
         self,
         table_name: str,
-        records: list,
-        dt: Optional[date] = None,
+        records: Sequence[BaseModel],
+        dt: date | None = None,
     ) -> int:
         if not records:
             return 0
 
         snapshot = dt or getattr(records[0], "snapshot_date", date.today())
+        if not isinstance(snapshot, date):
+            snapshot = date.today()
         schema = _schema_for_model(table_name)
         partition_dir = _partition_path(self.output_dir, "freight", table_name, snapshot)
         partition_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +161,7 @@ class StorageWriter:
             d = r.model_dump(mode="python")
             if d.get("raw_record") is not None:
                 import json
+
                 d["raw_record"] = json.dumps(d["raw_record"], default=str)
             d["ingested_at"] = d.get("ingested_at", pd.Timestamp.now("UTC"))
             serialized.append(d)
@@ -172,7 +177,7 @@ class StorageWriter:
         # Write Parquet
         pa_table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
         file_path = partition_dir / f"{table_name}.parquet"
-        pq.write_table(pa_table, file_path, compression="zstd")
+        pq.write_table(pa_table, file_path, compression="zstd")  # type: ignore[no-untyped-call]
         log.info("Wrote %d records to %s", len(records), file_path)
         self.written_paths.append(str(file_path))
 
@@ -197,7 +202,9 @@ class StorageWriter:
         with open(summary_file, "w") as f:
             json.dump(
                 json.loads(summary.model_dump_json()),
-                f, indent=2, default=serialize,
+                f,
+                indent=2,
+                default=serialize,
             )
         log.info("Wrote pipeline summary to %s", summary_file)
         self.written_paths.append(str(summary_file))

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from typing import Any, Optional
+from datetime import date
+from typing import Any, cast
 
 import requests
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential_jitter
@@ -15,17 +15,72 @@ from .base import BaseSource, SourceResult
 log = logging.getLogger(__name__)
 
 FBX_ROUTES: list[dict[str, str]] = [
-    {"route_code": "FBX01", "description": "China/East Asia → North America West Coast", "origin": "CNSHA", "destination": "USLAX"},
-    {"route_code": "FBX02", "description": "North America West Coast → China/East Asia", "origin": "USLAX", "destination": "CNSHA"},
-    {"route_code": "FBX03", "description": "China/East Asia → North America East Coast", "origin": "CNSHA", "destination": "USNYC"},
-    {"route_code": "FBX11", "description": "China/East Asia → North Europe", "origin": "CNSHA", "destination": "NLRTM"},
-    {"route_code": "FBX13", "description": "China/East Asia → Mediterranean", "origin": "CNSHA", "destination": "ESBCN"},
-    {"route_code": "FBX14", "description": "North Europe → China/East Asia", "origin": "NLRTM", "destination": "CNSHA"},
-    {"route_code": "FBX21", "description": "North America West Coast → North Europe", "origin": "USLAX", "destination": "NLRTM"},
-    {"route_code": "FBX22", "description": "North Europe → North America West Coast", "origin": "NLRTM", "destination": "USLAX"},
-    {"route_code": "FBX24", "description": "North America East Coast → North Europe", "origin": "USNYC", "destination": "NLRTM"},
-    {"route_code": "FBX25", "description": "North Europe → North America East Coast", "origin": "NLRTM", "destination": "USNYC"},
-    {"route_code": "FBX31", "description": "North America East Coast → Central America", "origin": "USMIA", "destination": "PAAUA"},
+    {
+        "route_code": "FBX01",
+        "description": "China/East Asia → North America West Coast",
+        "origin": "CNSHA",
+        "destination": "USLAX",
+    },
+    {
+        "route_code": "FBX02",
+        "description": "North America West Coast → China/East Asia",
+        "origin": "USLAX",
+        "destination": "CNSHA",
+    },
+    {
+        "route_code": "FBX03",
+        "description": "China/East Asia → North America East Coast",
+        "origin": "CNSHA",
+        "destination": "USNYC",
+    },
+    {
+        "route_code": "FBX11",
+        "description": "China/East Asia → North Europe",
+        "origin": "CNSHA",
+        "destination": "NLRTM",
+    },
+    {
+        "route_code": "FBX13",
+        "description": "China/East Asia → Mediterranean",
+        "origin": "CNSHA",
+        "destination": "ESBCN",
+    },
+    {
+        "route_code": "FBX14",
+        "description": "North Europe → China/East Asia",
+        "origin": "NLRTM",
+        "destination": "CNSHA",
+    },
+    {
+        "route_code": "FBX21",
+        "description": "North America West Coast → North Europe",
+        "origin": "USLAX",
+        "destination": "NLRTM",
+    },
+    {
+        "route_code": "FBX22",
+        "description": "North Europe → North America West Coast",
+        "origin": "NLRTM",
+        "destination": "USLAX",
+    },
+    {
+        "route_code": "FBX24",
+        "description": "North America East Coast → North Europe",
+        "origin": "USNYC",
+        "destination": "NLRTM",
+    },
+    {
+        "route_code": "FBX25",
+        "description": "North Europe → North America East Coast",
+        "origin": "NLRTM",
+        "destination": "USNYC",
+    },
+    {
+        "route_code": "FBX31",
+        "description": "North America East Coast → Central America",
+        "origin": "USMIA",
+        "destination": "PAAUA",
+    },
     {"route_code": "FBX41", "description": "Intra-Asia", "origin": "CNSHA", "destination": "SGSIN"},
 ]
 
@@ -53,7 +108,9 @@ class FreightosFBXSource(BaseSource):
             warnings.append(f"Cannot reach Freightos API: {exc}")
         return warnings
 
-    def fetch(self, snapshot_date: Optional[date] = None, **kwargs: Any) -> SourceResult[OceanFreightRate]:
+    def fetch(
+        self, snapshot_date: date | None = None, **kwargs: Any
+    ) -> SourceResult[OceanFreightRate]:
         self.log.info("Fetching ocean freight rates from Freightos FBX...")
         raw_results = self._fetch_all_routes()
         normalizer = DataNormalizer()
@@ -87,7 +144,8 @@ class FreightosFBXSource(BaseSource):
                 except Exception as exc:
                     self.log.warning(
                         "Failed to fetch route %s: %s",
-                        route["route_code"], exc,
+                        route["route_code"],
+                        exc,
                     )
         return results
 
@@ -122,16 +180,16 @@ class FreightosFBXSource(BaseSource):
 
         if resp.status_code == 429:
             self.log.warning("Rate limited on FBX API; backing off")
-            raise IOError("Rate limited by Freightos API")
+            raise OSError("Rate limited by Freightos API")
 
         resp.raise_for_status()
 
         data = resp.json()
-        records = []
+        records: list[Any] = []
         if isinstance(data, list):
             records = data
         elif isinstance(data, dict):
-            records = data.get("data", data.get("results", [data]))
+            records = cast(list[Any], data.get("data", data.get("results", [data])))
 
         for rec in records:
             rec["originPort"] = origin

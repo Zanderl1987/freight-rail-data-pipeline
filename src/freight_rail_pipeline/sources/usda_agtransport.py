@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from typing import Any, Optional
+from datetime import date
+from typing import Any
 
-import requests
 from sodapy import Socrata
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential_jitter
 
@@ -21,7 +20,7 @@ class USDAgTransportSource(BaseSource):
 
     def __init__(self, config: PipelineConfig) -> None:
         super().__init__(config)
-        self._client: Optional[Socrata] = None
+        self._client: Socrata | None = None
 
     @property
     def name(self) -> str:
@@ -39,7 +38,9 @@ class USDAgTransportSource(BaseSource):
             self._close_client()
         return warnings
 
-    def fetch(self, snapshot_date: Optional[date] = None, **kwargs: Any) -> SourceResult[dict]:
+    def fetch(
+        self, snapshot_date: date | None = None, **kwargs: Any
+    ) -> SourceResult[RailCarloading]:
         self.log.info("Fetching rail carloadings from USDA AgTransport...")
         carloadings_result = self._fetch_carloadings(snapshot_date)
 
@@ -66,10 +67,12 @@ class USDAgTransportSource(BaseSource):
             },
         )
 
-    def fetch_carloadings(self, snapshot_date: Optional[date] = None) -> SourceResult[RailCarloading]:
+    def fetch_carloadings(self, snapshot_date: date | None = None) -> SourceResult[dict[str, Any]]:
         return self._fetch_carloadings(snapshot_date)
 
-    def fetch_service_metrics(self, snapshot_date: Optional[date] = None) -> SourceResult[RailServiceMetric]:
+    def fetch_service_metrics(
+        self, snapshot_date: date | None = None
+    ) -> SourceResult[RailServiceMetric]:
         raw_result = self._fetch_service_metrics(snapshot_date)
         normalizer = DataNormalizer()
         normalized = []
@@ -90,7 +93,7 @@ class USDAgTransportSource(BaseSource):
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
     )
-    def _fetch_carloadings(self, snapshot_date: Optional[date] = None) -> SourceResult[dict]:
+    def _fetch_carloadings(self, snapshot_date: date | None = None) -> SourceResult[dict[str, Any]]:
         resource_id = self.config.usda_socrata_resource_ids["rail_carloadings"]
         client = self._get_client()
         try:
@@ -98,7 +101,7 @@ class USDAgTransportSource(BaseSource):
             if snapshot_date:
                 where_clause = f"snapshot_date='{snapshot_date.isoformat()}'"
 
-            results: list[dict] = []
+            results: list[dict[str, Any]] = []
             page = 0
             limit = 1000
             while True:
@@ -131,7 +134,9 @@ class USDAgTransportSource(BaseSource):
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
     )
-    def _fetch_service_metrics(self, snapshot_date: Optional[date] = None) -> SourceResult[dict]:
+    def _fetch_service_metrics(
+        self, snapshot_date: date | None = None
+    ) -> SourceResult[dict[str, Any]]:
         resource_id = self.config.usda_socrata_resource_ids.get("rail_service_metrics")
         if not resource_id:
             self.log.warning("No resource ID configured for rail_service_metrics; skipping")
@@ -169,5 +174,5 @@ class USDAgTransportSource(BaseSource):
             try:
                 self._client.close()
             except Exception:
-                pass
+                log.debug("Error closing Socrata client", exc_info=True)
             self._client = None

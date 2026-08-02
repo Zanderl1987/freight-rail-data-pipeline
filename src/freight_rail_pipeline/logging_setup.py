@@ -3,16 +3,15 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
 
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "module": record.module,
@@ -30,7 +29,7 @@ def setup_logging(
     log_dir: Path,
     level: str = "INFO",
     json_format: bool = False,
-    logger_name: Optional[str] = None,
+    logger_name: str | None = None,
 ) -> logging.Logger:
     log_dir.mkdir(parents=True, exist_ok=True)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any
 
 from .schemas import (
     OceanFreightRate,
@@ -17,8 +17,8 @@ class DataNormalizer:
     @staticmethod
     def normalize_rail_carloading(
         raw: dict[str, Any],
-        snapshot_date: Optional[date] = None,
-    ) -> Optional[RailCarloading]:
+        snapshot_date: date | None = None,
+    ) -> RailCarloading | None:
         try:
             carloads_raw = raw.get("carloads") or raw.get("volume") or raw.get("count")
             if carloads_raw is None:
@@ -41,8 +41,8 @@ class DataNormalizer:
     @staticmethod
     def normalize_rail_service_metric(
         raw: dict[str, Any],
-        snapshot_date: Optional[date] = None,
-    ) -> Optional[RailServiceMetric]:
+        snapshot_date: date | None = None,
+    ) -> RailServiceMetric | None:
         try:
             metric_name = raw.get("metric_name") or raw.get("metric") or raw.get("indicator")
             metric_value = raw.get("metric_value") or raw.get("value")
@@ -65,7 +65,7 @@ class DataNormalizer:
             return None
 
     @staticmethod
-    def normalize_ocean_freight_rate(raw: dict[str, Any]) -> Optional[OceanFreightRate]:
+    def normalize_ocean_freight_rate(raw: dict[str, Any]) -> OceanFreightRate | None:
         try:
             rate_usd = raw.get("rateUsd") or raw.get("rate_usd") or raw.get("rate")
             if rate_usd is None:
@@ -82,7 +82,9 @@ class DataNormalizer:
                 route_code=str(raw.get("routeCode", raw.get("route_code", "unknown"))),
                 route_description=str(raw.get("route", raw.get("route_description", ""))),
                 origin_port=str(raw.get("originPort", raw.get("origin_port", "unknown"))),
-                destination_port=str(raw.get("destinationPort", raw.get("destination_port", "unknown"))),
+                destination_port=str(
+                    raw.get("destinationPort", raw.get("destination_port", "unknown"))
+                ),
                 trade_lane=str(raw.get("tradeRoute", raw.get("trade_lane", "unknown"))),
                 container_type=str(raw.get("containerType", raw.get("container_type", "40GP"))),
                 rate_usd=int(rate_usd),

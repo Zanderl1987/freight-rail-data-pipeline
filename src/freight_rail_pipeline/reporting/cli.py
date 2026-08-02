@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import json
 import logging
 import sys
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from ..config import PipelineConfig
 from ..pipeline import FreightPipeline
@@ -46,14 +43,16 @@ def main(ctx: click.Context, verbose: bool) -> None:
 @click.option("--date", "-d", "snapshot_date", default=None, help="Snapshot date (YYYY-MM-DD)")
 @click.option("--output-dir", "-o", default=None, help="Override output directory")
 @click.pass_context
-def run(ctx: click.Context, sources: str, snapshot_date: Optional[str], output_dir: Optional[str]) -> None:
+def run(
+    ctx: click.Context, sources: str, snapshot_date: str | None, output_dir: str | None
+) -> None:
     pipeline = FreightPipeline(config=ctx.obj["config"])
 
-    source_list: Optional[list[str]] = None
+    source_list: list[str] | None = None
     if sources:
         source_list = [s.strip() for s in sources.split(",") if s.strip()]
 
-    parsed_date: Optional[date] = None
+    parsed_date: date | None = None
     if snapshot_date:
         parsed_date = date.fromisoformat(snapshot_date)
 
@@ -128,7 +127,7 @@ def sources(ctx: click.Context) -> None:
 @click.argument("table", required=False)
 @click.option("--source", "-s", "source_dir", default="data", help="Data directory to inspect")
 @click.pass_context
-def explore(ctx: click.Context, table: Optional[str], source_dir: str) -> None:
+def explore(ctx: click.Context, table: str | None, source_dir: str) -> None:
     import pandas as pd
 
     data_path = Path(source_dir)
@@ -168,13 +167,13 @@ def explore(ctx: click.Context, table: Optional[str], source_dir: str) -> None:
 @click.option("--data-dir", default="data", help="Data directory for the dashboard")
 @click.pass_context
 def dashboard(ctx: click.Context, port: int, data_dir: str) -> None:
+    import os
     import subprocess
-    import sys as _sys
 
     dashboard_path = Path(__file__).parent / "dashboard.py"
     if not dashboard_path.exists():
         console.print(f"[red]Dashboard script not found at {dashboard_path}[/]")
-        _sys.exit(1)
+        sys.exit(1)
 
     env = {
         "FREIGHT_PIPELINE_DATA_DIR": str(Path(data_dir).resolve()),
@@ -185,9 +184,9 @@ def dashboard(ctx: click.Context, port: int, data_dir: str) -> None:
     console.print(f"[green]Launching Streamlit dashboard on port {port}...[/]")
     console.print(f"[dim]Data directory: {Path(data_dir).resolve()}[/]")
 
-    subprocess.run(
-        [_sys.executable, "-m", "streamlit", "run", str(dashboard_path)],
-        env={**dict(_sys.environ), **env},
+    subprocess.run(  # noqa: S603 — fixed arg list, no shell, path from module location
+        [sys.executable, "-m", "streamlit", "run", str(dashboard_path)],
+        env={**dict(os.environ), **env},
     )
 
 

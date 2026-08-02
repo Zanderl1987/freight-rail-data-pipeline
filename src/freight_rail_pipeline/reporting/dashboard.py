@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
-from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +17,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+log = logging.getLogger(__name__)
 
 DATA_DIR = Path(os.getenv("FREIGHT_PIPELINE_DATA_DIR", "data"))
 
@@ -33,6 +35,7 @@ def load_data(table_name: str) -> pd.DataFrame:
             df = pd.read_parquet(f)
             dfs.append(df)
         except Exception:
+            log.exception("Failed to read parquet file %s", f)
             continue
     if not dfs:
         return pd.DataFrame()
@@ -61,6 +64,7 @@ def load_pipeline_runs() -> pd.DataFrame:
                 data = json.load(fh)
             records.append(data)
         except Exception:
+            log.exception("Failed to read pipeline run %s", f)
             continue
     if not records:
         return pd.DataFrame()
@@ -74,7 +78,9 @@ def load_pipeline_runs() -> pd.DataFrame:
 
 def main() -> None:
     st.sidebar.title("🚂 Freight Rail Pipeline")
-    st.sidebar.markdown("Data pipeline dashboard for freight rail and ocean container shipping rates.")
+    st.sidebar.markdown(
+        "Data pipeline dashboard for freight rail and ocean container shipping rates."
+    )
 
     available = list_available_tables()
     if not available:
@@ -107,7 +113,9 @@ def show_pipeline_runs() -> None:
     cols = st.columns(4)
     total_runs = len(runs)
     successful = runs["success"].sum() if "success" in runs.columns else 0
-    total_records = runs["total_records_written"].sum() if "total_records_written" in runs.columns else 0
+    total_records = (
+        runs["total_records_written"].sum() if "total_records_written" in runs.columns else 0
+    )
 
     with cols[0]:
         st.metric("Total Runs", total_runs)
@@ -121,12 +129,18 @@ def show_pipeline_runs() -> None:
     if "started_at" in runs.columns:
         run_chart_data = runs.copy()
         run_chart_data["date"] = run_chart_data["started_at"].dt.date
-        daily = run_chart_data.groupby("date").agg(
-            runs=("run_id", "count"),
-            records=("total_records_written", "sum"),
-        ).reset_index()
+        daily = (
+            run_chart_data.groupby("date")
+            .agg(
+                runs=("run_id", "count"),
+                records=("total_records_written", "sum"),
+            )
+            .reset_index()
+        )
         fig = px.bar(
-            daily, x="date", y="records",
+            daily,
+            x="date",
+            y="records",
             title="Records Written per Day",
             labels={"records": "Records", "date": "Date"},
             color_discrete_sequence=["#2E86AB"],
@@ -134,7 +148,14 @@ def show_pipeline_runs() -> None:
         st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Recent Runs")
-    display_cols = ["run_id", "started_at", "success", "total_records_written", "sources_succeeded", "sources_failed"]
+    display_cols = [
+        "run_id",
+        "started_at",
+        "success",
+        "total_records_written",
+        "sources_succeeded",
+        "sources_failed",
+    ]
     available_cols = [c for c in display_cols if c in runs.columns]
     st.dataframe(runs.sort_values("started_at", ascending=False).head(20)[available_cols])
 
@@ -151,11 +172,19 @@ def show_rail_carloadings() -> None:
         with cols[0]:
             if "railroad" in df.columns:
                 railroads = sorted(df["railroad"].dropna().unique())
-                selected_rr = st.multiselect("Railroad", railroads, default=railroads[:3] if len(railroads) > 3 else railroads)
+                selected_rr = st.multiselect(
+                    "Railroad",
+                    railroads,
+                    default=railroads[:3] if len(railroads) > 3 else railroads,
+                )
         with cols[1]:
             if "commodity" in df.columns:
                 commodities = sorted(df["commodity"].dropna().unique())
-                selected_comm = st.multiselect("Commodity", commodities, default=commodities[:5] if len(commodities) > 5 else commodities)
+                selected_comm = st.multiselect(
+                    "Commodity",
+                    commodities,
+                    default=commodities[:5] if len(commodities) > 5 else commodities,
+                )
         with cols[2]:
             if "snapshot_date" in df.columns:
                 min_date = df["snapshot_date"].min()
@@ -187,20 +216,36 @@ def show_rail_carloadings() -> None:
 
     with col2:
         if "commodity" in filtered.columns and "carloads" in filtered.columns:
-            by_comm = filtered.groupby("commodity")["carloads"].sum().reset_index().sort_values("carloads", ascending=False)
-            fig = px.bar(by_comm.head(15), x="commodity", y="carloads", title="Top Commodities by Carloads")
+            by_comm = (
+                filtered.groupby("commodity")["carloads"]
+                .sum()
+                .reset_index()
+                .sort_values("carloads", ascending=False)
+            )
+            fig = px.bar(
+                by_comm.head(15), x="commodity", y="carloads", title="Top Commodities by Carloads"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     if "snapshot_date" in filtered.columns and "carloads" in filtered.columns:
-        trend = filtered.groupby("snapshot_date").agg(
-            total_carloads=("carloads", "sum"),
-            record_count=("carloads", "count"),
-        ).reset_index()
+        trend = (
+            filtered.groupby("snapshot_date")
+            .agg(
+                total_carloads=("carloads", "sum"),
+                record_count=("carloads", "count"),
+            )
+            .reset_index()
+        )
         fig = px.line(trend, x="snapshot_date", y="total_carloads", title="Carloads Over Time")
         st.plotly_chart(fig, use_container_width=True)
 
     st.subheader(f"Raw Data ({len(filtered)} rows)")
-    st.dataframe(filtered.drop(columns=[c for c in ["raw_record", "ingested_at"] if c in filtered.columns], errors="ignore"))
+    st.dataframe(
+        filtered.drop(
+            columns=[c for c in ["raw_record", "ingested_at"] if c in filtered.columns],
+            errors="ignore",
+        )
+    )
 
 
 def show_ocean_rates() -> None:
@@ -248,7 +293,8 @@ def show_ocean_rates() -> None:
             avg_by_route = filtered.groupby("route_code")["rate_usd"].mean().reset_index()
             fig = px.bar(
                 avg_by_route.sort_values("rate_usd", ascending=False),
-                x="route_code", y="rate_usd",
+                x="route_code",
+                y="rate_usd",
                 title="Average Rate by Route (USD)",
                 color="rate_usd",
                 color_continuous_scale="Viridis",
@@ -257,7 +303,9 @@ def show_ocean_rates() -> None:
 
     with col2:
         if "trade_lane" in filtered.columns and "rate_usd" in filtered.columns:
-            by_lane = filtered.groupby("trade_lane")["rate_usd"].agg(["mean", "min", "max"]).reset_index()
+            by_lane = (
+                filtered.groupby("trade_lane")["rate_usd"].agg(["mean", "min", "max"]).reset_index()
+            )
             fig = go.Figure()
             fig.add_trace(go.Bar(name="Mean", x=by_lane["trade_lane"], y=by_lane["mean"]))
             fig.add_trace(go.Bar(name="Min", x=by_lane["trade_lane"], y=by_lane["min"]))
@@ -265,16 +313,28 @@ def show_ocean_rates() -> None:
             fig.update_layout(title="Rate Statistics by Trade Lane", barmode="group")
             st.plotly_chart(fig, use_container_width=True)
 
-    if "snapshot_date" in filtered.columns and "rate_usd" in filtered.columns and "route_code" in filtered.columns:
+    if (
+        "snapshot_date" in filtered.columns
+        and "rate_usd" in filtered.columns
+        and "route_code" in filtered.columns
+    ):
         trend = filtered.groupby(["snapshot_date", "route_code"])["rate_usd"].mean().reset_index()
         fig = px.line(
-            trend, x="snapshot_date", y="rate_usd", color="route_code",
+            trend,
+            x="snapshot_date",
+            y="rate_usd",
+            color="route_code",
             title="Rate Trends by Route",
         )
         st.plotly_chart(fig, use_container_width=True)
 
     st.subheader(f"Raw Data ({len(filtered)} rows)")
-    st.dataframe(filtered.drop(columns=[c for c in ["raw_record", "ingested_at"] if c in filtered.columns], errors="ignore"))
+    st.dataframe(
+        filtered.drop(
+            columns=[c for c in ["raw_record", "ingested_at"] if c in filtered.columns],
+            errors="ignore",
+        )
+    )
 
 
 def show_raw_explorer(available: list[str]) -> None:
@@ -289,12 +349,17 @@ def show_raw_explorer(available: list[str]) -> None:
     st.metric("Columns", len(df.columns))
 
     st.subheader("Column Info")
-    col_info = pd.DataFrame({
-        "dtype": df.dtypes,
-        "non_null": df.count(),
-        "null_pct": (df.isnull().sum() / len(df) * 100).round(1),
-        "unique": [df[c].nunique() if df[c].dtype in ["object", "category"] else "N/A" for c in df.columns],
-    })
+    col_info = pd.DataFrame(
+        {
+            "dtype": df.dtypes,
+            "non_null": df.count(),
+            "null_pct": (df.isnull().sum() / len(df) * 100).round(1),
+            "unique": [
+                df[c].nunique() if df[c].dtype in ["object", "category"] else "N/A"
+                for c in df.columns
+            ],
+        }
+    )
     st.dataframe(col_info)
 
     st.subheader("Sample Data")

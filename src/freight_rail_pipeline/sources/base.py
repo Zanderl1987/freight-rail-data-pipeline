@@ -4,11 +4,10 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from tenacity import (
     before_sleep_log,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
@@ -27,7 +26,7 @@ class SourceResult(Generic[T]):
     source_name: str
     record_count: int = 0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -42,26 +41,23 @@ class BaseSource(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @abstractmethod
-    def fetch(self, snapshot_date: Optional[date] = None, **kwargs: Any) -> SourceResult:
-        ...
+    def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[Any]: ...
 
-    def _build_retry_decorator(self) -> dict:
+    def _build_retry_decorator(self) -> dict[str, Any]:
         return {
             "stop": stop_after_attempt(self.config.max_retries),
             "wait": wait_exponential_jitter(initial=2, max=60, jitter=2),
-            "retry": retry_if_exception_type(
-                (ConnectionError, TimeoutError, IOError)
-            ),
+            "retry": retry_if_exception_type((ConnectionError, TimeoutError, IOError)),
             "before_sleep": before_sleep_log(log, logging.WARNING),
             "reraise": True,
         }
 
-    def get_credential(self, key: str) -> Optional[str]:
+    def get_credential(self, key: str) -> str | None:
         import os
+
         return os.getenv(key)
 
     def validate(self) -> list[str]:

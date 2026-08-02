@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
-from typing import Optional
+from datetime import UTC, date, datetime
+from typing import Any
 
 from . import sources as src
 from .config import PipelineConfig
@@ -34,7 +33,7 @@ class PipelineResult:
 
 
 class FreightPipeline:
-    def __init__(self, config: Optional[PipelineConfig] = None) -> None:
+    def __init__(self, config: PipelineConfig | None = None) -> None:
         self.config = config or PipelineConfig.from_env()
         self.config.ensure_dirs()
         self.logger = setup_logging(
@@ -51,16 +50,16 @@ class FreightPipeline:
 
     def run(
         self,
-        sources: Optional[list[str]] = None,
-        snapshot_date: Optional[date] = None,
+        sources: list[str] | None = None,
+        snapshot_date: date | None = None,
     ) -> PipelineResult:
         start = time.monotonic()
-        run_id = datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
+        run_id = datetime.now(UTC).strftime("run_%Y%m%d_%H%M%S")
         log.info("Pipeline run %s starting — sources=%s", run_id, sources or list(self._sources))
 
         summary = PipelineRunSummary(
             run_id=run_id,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         result = PipelineResult(run_id=run_id, success=True)
 
@@ -71,13 +70,16 @@ class FreightPipeline:
             log.info("=== Running source: %s ===", name)
             try:
                 source_result = source.fetch(snapshot_date=snapshot_date)
-                source_result_written = self._write_source_output(name, source_result, snapshot_date)
+                source_result_written = self._write_source_output(
+                    name, source_result, snapshot_date
+                )
                 result.source_results[name] = source_result_written
                 result.total_records += source_result_written
                 summary.sources_succeeded.append(name)
                 log.info(
                     "Source %s completed: %d records written",
-                    name, source_result_written,
+                    name,
+                    source_result_written,
                 )
             except Exception as exc:
                 log.exception("Source %s failed: %s", name, exc)
@@ -91,7 +93,7 @@ class FreightPipeline:
         summary.output_paths = result.output_paths
         summary.total_records_written = result.total_records
         summary.success = result.success
-        summary.finished_at = datetime.now(timezone.utc)
+        summary.finished_at = datetime.now(UTC)
 
         self.storage.write_summary(summary)
 
@@ -100,7 +102,10 @@ class FreightPipeline:
 
         log.info(
             "Pipeline run %s finished — success=%s, records=%d, duration=%.1fs",
-            run_id, result.success, result.total_records, duration,
+            run_id,
+            result.success,
+            result.total_records,
+            duration,
         )
         return result
 
@@ -110,7 +115,7 @@ class FreightPipeline:
     def validate_sources(self) -> dict[str, list[str]]:
         return {name: source.validate() for name, source in self._sources.items()}
 
-    def _resolve_sources(self, names: Optional[list[str]]) -> dict[str, src.BaseSource]:
+    def _resolve_sources(self, names: list[str] | None) -> dict[str, src.BaseSource]:
         if not names:
             return dict(self._sources)
         resolved: dict[str, src.BaseSource] = {}
@@ -124,8 +129,8 @@ class FreightPipeline:
     def _write_source_output(
         self,
         source_name: str,
-        source_result: src.SourceResult,
-        snapshot_date: Optional[date] = None,
+        source_result: src.SourceResult[Any],
+        snapshot_date: date | None = None,
     ) -> int:
         records = source_result.records
         if not records:
@@ -136,19 +141,22 @@ class FreightPipeline:
         cl_records = [r for r in records if type(r).__name__ == "RailCarloading"]
         if cl_records:
             written += self.storage.write_carloadings(
-                RailCarloadingBatch(records=cl_records), dt=snapshot_date,
+                RailCarloadingBatch(records=cl_records),
+                dt=snapshot_date,
             )
 
         sm_records = [r for r in records if type(r).__name__ == "RailServiceMetric"]
         if sm_records:
             written += self.storage.write_service_metrics(
-                RailServiceMetricBatch(records=sm_records), dt=snapshot_date,
+                RailServiceMetricBatch(records=sm_records),
+                dt=snapshot_date,
             )
 
         of_records = [r for r in records if type(r).__name__ == "OceanFreightRate"]
         if of_records:
             written += self.storage.write_ocean_rates(
-                OceanFreightRateBatch(records=of_records), dt=snapshot_date,
+                OceanFreightRateBatch(records=of_records),
+                dt=snapshot_date,
             )
 
         return written
