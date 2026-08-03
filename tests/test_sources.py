@@ -11,6 +11,10 @@ import responses
 
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
+from freight_rail_pipeline.sources.fmcsa_carrier_census import (
+    SELECT_COLUMNS,
+    FMCSACarrierCensusSource,
+)
 from freight_rail_pipeline.sources.fra_safety import FRASafetySource
 from freight_rail_pipeline.sources.freightos_fbx import FBX_ROUTES, FreightosFBXSource
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
@@ -341,6 +345,77 @@ class TestFRASafetySource:
             assert "day='17'" in where
         assert "accidentmonth='3'" in where_calls[0] or "accidentmonth='03'" in where_calls[0]
         assert "month='3'" in where_calls[1] or "month='03'" in where_calls[1]
+
+
+class TestFMCSACarrierCensusSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> FMCSACarrierCensusSource:
+        return FMCSACarrierCensusSource(config)
+
+    @patch("freight_rail_pipeline.sources.fmcsa_carrier_census.Socrata")
+    def test_fetch_returns_normalized_records_and_requests_only_safe_columns(
+        self, mock_socrata: MagicMock, source: FMCSACarrierCensusSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        # Real shape confirmed live 2026-08-03 against datahub.transportation.gov
+        # resource kjg3-diqy, already restricted to non-identity columns.
+        mock_client.get.return_value = [
+            {
+                "dot_number": "1000000",
+                "carrier_operation": "A",
+                "phy_state": "AL",
+                "nbr_power_unit": "2",
+                "driver_total": "2",
+                "recent_mileage": "24227",
+                "recent_mileage_year": "2025",
+                "mcs150_date": "21-APR-26",
+            }
+        ]
+
+        result = source.fetch(snapshot_date=None)
+        assert result.success is True
+        assert result.record_count == 1
+        assert result.source_name == "fmcsa_carrier_census"
+
+        record = result.records[0]
+        assert record.dot_number == "1000000"
+        assert record.state == "AL"
+        assert record.power_units == 2
+
+        # PII-safety contract: the source must only ever request the
+        # non-identity column list, never name/address/email/phone fields.
+        call_kwargs = mock_client.get.call_args.kwargs
+        assert call_kwargs["select"] == SELECT_COLUMNS
+        for pii_field in ("legal_name", "dba_name", "phy_street", "email_address", "telephone"):
+            assert pii_field not in call_kwargs["select"]
+
+    @patch("freight_rail_pipeline.sources.fmcsa_carrier_census.Socrata")
+    def test_fetch_handles_empty_response(
+        self, mock_socrata: MagicMock, source: FMCSACarrierCensusSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = []
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 0
+
+    @patch("freight_rail_pipeline.sources.fmcsa_carrier_census.Socrata")
+    def test_validate_connectivity(
+        self, mock_socrata: MagicMock, source: FMCSACarrierCensusSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = [{"dot_number": "1"}]
+
+        warnings = source.validate()
+        assert warnings == []
 
 
 class TestFreightosFBXSource:

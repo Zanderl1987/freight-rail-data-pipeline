@@ -158,6 +158,67 @@ class TestRailTariffRateNormalizer:
         assert DataNormalizer.normalize_rail_tariff_rate(raw) is None
 
 
+class TestMotorCarrierCensusNormalizer:
+    def test_valid_record(self) -> None:
+        raw = {
+            "dot_number": "1000000",
+            "carrier_operation": "A",
+            "phy_state": "AL",
+            "nbr_power_unit": "2",
+            "driver_total": "2",
+            "recent_mileage": "24227",
+            "recent_mileage_year": "2025",
+            "mcs150_date": "21-APR-26",
+        }
+        result = DataNormalizer.normalize_motor_carrier_census(raw)
+        assert result is not None
+        assert result.dot_number == "1000000"
+        assert result.carrier_operation == "A"
+        assert result.state == "AL"
+        assert result.power_units == 2
+        assert result.driver_count == 2
+        assert result.mileage == 24227
+        assert result.mileage_year == 2025
+        assert result.snapshot_date == date(2026, 4, 21)
+
+    def test_no_pii_fields_in_output(self) -> None:
+        # Even if a legal_name/email somehow ended up in raw (shouldn't happen
+        # since the source only ever selects non-identity columns), the model
+        # itself has no field to carry it -- confirms the schema-level guard.
+        raw = {
+            "dot_number": "42",
+            "legal_name": "SHOULD NOT APPEAR",
+            "email_address": "should-not-appear@example.com",
+        }
+        result = DataNormalizer.normalize_motor_carrier_census(raw)
+        assert result is not None
+        assert "legal_name" not in result.model_dump()
+        assert "email_address" not in result.model_dump()
+        assert not hasattr(result, "raw_record")
+
+    def test_missing_dot_number_returns_none(self) -> None:
+        raw = {"carrier_operation": "A", "mcs150_date": "21-APR-26"}
+        assert DataNormalizer.normalize_motor_carrier_census(raw) is None
+
+    def test_null_date_falls_back_to_snapshot_date(self) -> None:
+        raw = {"dot_number": "42", "mcs150_date": None}
+        result = DataNormalizer.normalize_motor_carrier_census(raw, snapshot_date=date(2026, 1, 1))
+        assert result is not None
+        assert result.snapshot_date == date(2026, 1, 1)
+
+    def test_zero_mileage_is_valid_not_missing(self) -> None:
+        raw = {
+            "dot_number": "42",
+            "recent_mileage": "0",
+            "recent_mileage_year": "0",
+            "mcs150_date": "30-APR-22",
+        }
+        result = DataNormalizer.normalize_motor_carrier_census(raw)
+        assert result is not None
+        assert result.mileage == 0
+        assert result.mileage_year == 0
+
+
 class TestRailServiceMetricNormalizer:
     def test_valid_record(self) -> None:
         raw = {

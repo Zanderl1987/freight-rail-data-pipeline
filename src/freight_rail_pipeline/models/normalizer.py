@@ -7,6 +7,7 @@ from typing import Any
 
 from .schemas import (
     FreightIndicator,
+    MotorCarrierCensus,
     OceanFreightRate,
     RailCarloading,
     RailSafetyIncident,
@@ -314,6 +315,46 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize rail tariff rate record: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def _parse_fmcsa_date(value: Any) -> date | None:
+        """FMCSA's mcs150_date is 'DD-MON-YY' (e.g. '20-OCT-23'), not ISO."""
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            return datetime.strptime(value, "%d-%b-%y").date()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def normalize_motor_carrier_census(
+        raw: dict[str, Any],
+        snapshot_date: date | None = None,
+    ) -> MotorCarrierCensus | None:
+        """`raw` must already be PII-stripped -- the FMCSA source only ever
+        selects non-identity columns from Socrata (see fmcsa_carrier_census.py),
+        so no name/address/email/phone fields exist here to accidentally keep."""
+        try:
+            dot_number = raw.get("dot_number")
+            if not dot_number:
+                return None
+
+            record_date = DataNormalizer._parse_fmcsa_date(raw.get("mcs150_date"))
+            reported = record_date or snapshot_date or date.today()
+
+            return MotorCarrierCensus(
+                snapshot_date=reported,
+                dot_number=str(dot_number),
+                carrier_operation=raw.get("carrier_operation"),
+                state=raw.get("phy_state"),
+                power_units=DataNormalizer._safe_int(raw.get("nbr_power_unit")),
+                driver_count=DataNormalizer._safe_int(raw.get("driver_total")),
+                mileage=DataNormalizer._safe_int(raw.get("recent_mileage")),
+                mileage_year=DataNormalizer._safe_int(raw.get("recent_mileage_year")),
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize motor carrier census record: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod
