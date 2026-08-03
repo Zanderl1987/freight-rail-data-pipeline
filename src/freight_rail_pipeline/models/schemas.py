@@ -177,6 +177,37 @@ class RailSafetyIncidentBatch(BaseModel):
         return len(self.records)
 
 
+class MotorCarrierCensus(BaseModel):
+    """A snapshot of one FMCSA-registered motor carrier's fleet-size profile.
+
+    Deliberately excludes `raw_record` (unlike every other model here) and the
+    source query never selects name/address/email/phone columns in the first
+    place -- FMCSA's carrier census is per-individual PII (2M+ carriers, many
+    sole proprietors), not aggregate freight data. User decision 2026-08-03:
+    keep only fleet-size/operational fields, strip identity fields entirely,
+    server-side, before any data is fetched. Do not add raw_record back."""
+
+    source: str = Field(default="fmcsa_carrier_census")
+    snapshot_date: date = Field(..., description="MCS-150 census filing date")
+    dot_number: str = Field(..., description="FMCSA DOT number (carrier's public registration ID)")
+    carrier_operation: str | None = Field(default=None, description="Interstate/intrastate operation code")
+    state: str | None = Field(default=None, description="Physical location state")
+    power_units: int | None = Field(default=None, ge=0, description="Number of power units (trucks/tractors)")
+    driver_count: int | None = Field(default=None, ge=0, description="Total drivers")
+    mileage: int | None = Field(default=None, ge=0, description="Most recent annual mileage")
+    mileage_year: int | None = Field(default=None, description="Year the mileage figure applies to")
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class MotorCarrierCensusBatch(BaseModel):
+    records: list[MotorCarrierCensus]
+    source: str = "fmcsa_carrier_census"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class PipelineRunSummary(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     started_at: datetime = Field(...)

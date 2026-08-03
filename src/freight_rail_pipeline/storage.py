@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .config import PipelineConfig
 from .models.schemas import (
     FreightIndicatorBatch,
+    MotorCarrierCensusBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
@@ -126,6 +127,20 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "motor_carrier_census": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("dot_number", pa.utf8()),
+                pa.field("carrier_operation", pa.utf8(), nullable=True),
+                pa.field("state", pa.utf8(), nullable=True),
+                pa.field("power_units", pa.int64(), nullable=True),
+                pa.field("driver_count", pa.int64(), nullable=True),
+                pa.field("mileage", pa.int64(), nullable=True),
+                pa.field("mileage_year", pa.int64(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
         "rail_safety_incidents": pa.schema(
             [
                 pa.field("source", pa.utf8()),
@@ -213,6 +228,15 @@ class StorageWriter:
         if not batch.records:
             return 0
         return self._write_table("rail_tariff_rates", batch.records, dt)
+
+    def write_motor_carrier_census(
+        self,
+        batch: MotorCarrierCensusBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("motor_carrier_census", batch.records, dt)
 
     def write_rail_safety_incidents(
         self,

@@ -11,6 +11,7 @@ from .config import PipelineConfig
 from .logging_setup import setup_logging
 from .models.schemas import (
     FreightIndicatorBatch,
+    MotorCarrierCensusBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
@@ -51,6 +52,7 @@ class FreightPipeline:
             "fbx": src.FreightosFBXSource(self.config),
             "bts": src.BTSFreightIndicatorsSource(self.config),
             "fra": src.FRASafetySource(self.config),
+            "fmcsa": src.FMCSACarrierCensusSource(self.config),
         }
 
     def run(
@@ -175,6 +177,13 @@ class FreightPipeline:
         if tr_records:
             written += self.storage.write_rail_tariff_rates(
                 RailTariffRateBatch(records=tr_records),
+                dt=snapshot_date,
+            )
+
+        mc_records = [r for r in records if type(r).__name__ == "MotorCarrierCensus"]
+        if mc_records:
+            written += self.storage.write_motor_carrier_census(
+                MotorCarrierCensusBatch(records=mc_records),
                 dt=snapshot_date,
             )
 

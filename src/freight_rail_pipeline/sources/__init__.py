@@ -1,5 +1,6 @@
 from .base import BaseSource, SourceResult
 from .bts_freight_indicators import BTSFreightIndicatorsSource
+from .fmcsa_carrier_census import FMCSACarrierCensusSource
 from .fra_safety import FRASafetySource
 from .freightos_fbx import FreightosFBXSource
 from .usda_agtransport import USDAgTransportSource
@@ -11,4 +12,5 @@ __all__ = [
     "FreightosFBXSource",
     "BTSFreightIndicatorsSource",
     "FRASafetySource",
+    "FMCSACarrierCensusSource",
 ]
