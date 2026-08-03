@@ -140,6 +140,43 @@ class FreightIndicatorBatch(BaseModel):
         return len(self.records)
 
 
+class RailSafetyIncident(BaseModel):
+    """A single FRA safety event -- either a Form 54 train accident/incident
+    or a Form 57 highway-rail grade crossing incident. The two forms share a
+    common shape (railroad, date, location, casualties, damage cost) but have
+    different field names for casualty/cost totals, so `incident_type`
+    disambiguates which form this record came from."""
+
+    source: str = Field(default="fra_safety")
+    external_id: str = Field(..., description="FRA's reportkey/incidentkey, unique per event")
+    incident_type: str = Field(..., description="'train_accident' (Form 54) or 'highway_rail_crossing' (Form 57)")
+    incident_date: date = Field(..., description="Date the incident occurred")
+    railroad_code: str | None = Field(default=None, description="Reporting railroad's FRA code")
+    railroad_name: str | None = Field(default=None, description="Reporting railroad name")
+    state: str | None = Field(default=None, description="State name")
+    county: str | None = Field(default=None, description="County name")
+    category: str | None = Field(
+        default=None, description="Accident type (e.g. Derailment) or equipment involved"
+    )
+    total_killed: int | None = Field(default=None, ge=0)
+    total_injured: int | None = Field(default=None, ge=0)
+    damage_cost_usd: float | None = Field(default=None, ge=0)
+    latitude: float | None = Field(default=None)
+    longitude: float | None = Field(default=None)
+    narrative: str | None = Field(default=None)
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class RailSafetyIncidentBatch(BaseModel):
+    records: list[RailSafetyIncident]
+    source: str = "fra_safety"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class PipelineRunSummary(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     started_at: datetime = Field(...)

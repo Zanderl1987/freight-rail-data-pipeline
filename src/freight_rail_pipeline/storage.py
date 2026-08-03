@@ -16,6 +16,7 @@ from .models.schemas import (
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
+    RailSafetyIncidentBatch,
     RailServiceMetricBatch,
 )
 
@@ -108,6 +109,27 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "rail_safety_incidents": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("external_id", pa.utf8()),
+                pa.field("incident_type", pa.utf8()),
+                pa.field("incident_date", pa.date32()),
+                pa.field("railroad_code", pa.utf8(), nullable=True),
+                pa.field("railroad_name", pa.utf8(), nullable=True),
+                pa.field("state", pa.utf8(), nullable=True),
+                pa.field("county", pa.utf8(), nullable=True),
+                pa.field("category", pa.utf8(), nullable=True),
+                pa.field("total_killed", pa.int64(), nullable=True),
+                pa.field("total_injured", pa.int64(), nullable=True),
+                pa.field("damage_cost_usd", pa.float64(), nullable=True),
+                pa.field("latitude", pa.float64(), nullable=True),
+                pa.field("longitude", pa.float64(), nullable=True),
+                pa.field("narrative", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     return schemas.get(table_name, pa.schema([]))
 
@@ -166,6 +188,15 @@ class StorageWriter:
             return 0
         return self._write_table("freight_indicators", batch.records, dt)
 
+    def write_rail_safety_incidents(
+        self,
+        batch: RailSafetyIncidentBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("rail_safety_incidents", batch.records, dt)
+
     def _write_table(
         self,
         table_name: str,
@@ -198,6 +229,8 @@ class StorageWriter:
         # Ensure date-ish fields
         if "snapshot_date" in df.columns:
             df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+        if "incident_date" in df.columns:
+            df["incident_date"] = pd.to_datetime(df["incident_date"]).dt.date
         if "ingested_at" in df.columns:
             df["ingested_at"] = pd.to_datetime(df["ingested_at"])
 

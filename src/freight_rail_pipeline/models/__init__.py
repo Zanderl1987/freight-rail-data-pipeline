@@ -7,6 +7,8 @@ from .schemas import (
     PipelineRunSummary,
     RailCarloading,
     RailCarloadingBatch,
+    RailSafetyIncident,
+    RailSafetyIncidentBatch,
     RailServiceMetric,
     RailServiceMetricBatch,
     RailTariffRate,
@@ -24,6 +26,8 @@ __all__ = [
     "OceanFreightRateBatch",
     "FreightIndicator",
     "FreightIndicatorBatch",
+    "RailSafetyIncident",
+    "RailSafetyIncidentBatch",
     "PipelineRunSummary",
     "DataNormalizer",
 ]

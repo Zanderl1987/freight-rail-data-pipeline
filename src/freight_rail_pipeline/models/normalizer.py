@@ -8,6 +8,7 @@ from .schemas import (
     FreightIndicator,
     OceanFreightRate,
     RailCarloading,
+    RailSafetyIncident,
     RailServiceMetric,
 )
 
@@ -128,6 +129,87 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize freight indicator: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _parse_fra_date(raw: dict[str, Any]) -> date | None:
+        """FRA's `date` field is null on many older records (mostly pre-1990s) even
+        though year/month/day are populated -- fall back to reconstructing it. Form 54
+        uses `accidentmonth`; Form 57 has a plain `month` field."""
+        parsed = DataNormalizer._parse_date(raw.get("date"))
+        if parsed is not None:
+            return parsed
+        year = raw.get("year")
+        month = raw.get("month") or raw.get("accidentmonth")
+        day = raw.get("day")
+        if year and month and day:
+            try:
+                return date(int(year), int(month), int(day))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    @staticmethod
+    def normalize_rail_safety_incident(
+        raw: dict[str, Any], incident_type: str
+    ) -> RailSafetyIncident | None:
+        """incident_type: 'train_accident' (Form 54) or 'highway_rail_crossing' (Form 57) --
+        the two forms share most fields but use different names for casualty/cost totals
+        and even for the reporting railroad's own code/name."""
+        try:
+            external_id = raw.get("reportkey")
+            record_date = DataNormalizer._parse_fra_date(raw)
+            if external_id is None or record_date is None:
+                return None
+
+            if incident_type == "train_accident":
+                killed = raw.get("totalkilledform54")
+                injured = raw.get("totalinjuredform54")
+                damage = raw.get("totaldamagecost")
+                category = raw.get("accidenttype")
+            else:
+                killed = raw.get("totalkilledform57")
+                injured = raw.get("totalinjuredform57")
+                damage = raw.get("vehicledamagecost")
+                category = raw.get("equipmentinvolved")
+
+            return RailSafetyIncident(
+                external_id=str(external_id),
+                incident_type=incident_type,
+                incident_date=record_date,
+                railroad_code=raw.get("reportingrailroadcode") or raw.get("railroadcode"),
+                railroad_name=raw.get("reportingrailroadname") or raw.get("railroadname"),
+                state=raw.get("statename"),
+                county=raw.get("countyname"),
+                category=category,
+                total_killed=DataNormalizer._safe_int(killed),
+                total_injured=DataNormalizer._safe_int(injured),
+                damage_cost_usd=DataNormalizer._safe_float(damage),
+                latitude=DataNormalizer._safe_float(raw.get("latitude")),
+                longitude=DataNormalizer._safe_float(raw.get("longitude")),
+                narrative=raw.get("narrative"),
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize rail safety incident: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod

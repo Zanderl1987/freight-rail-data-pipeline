@@ -14,6 +14,7 @@ from .models.schemas import (
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
+    RailSafetyIncidentBatch,
     RailServiceMetricBatch,
 )
 from .storage import StorageWriter
@@ -48,6 +49,7 @@ class FreightPipeline:
             "usda": src.USDAgTransportSource(self.config),
             "fbx": src.FreightosFBXSource(self.config),
             "bts": src.BTSFreightIndicatorsSource(self.config),
+            "fra": src.FRASafetySource(self.config),
         }
 
     def run(
@@ -165,6 +167,13 @@ class FreightPipeline:
         if fi_records:
             written += self.storage.write_freight_indicators(
                 FreightIndicatorBatch(records=fi_records),
+                dt=snapshot_date,
+            )
+
+        si_records = [r for r in records if type(r).__name__ == "RailSafetyIncident"]
+        if si_records:
+            written += self.storage.write_rail_safety_incidents(
+                RailSafetyIncidentBatch(records=si_records),
                 dt=snapshot_date,
             )
 

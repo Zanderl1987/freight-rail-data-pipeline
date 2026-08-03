@@ -171,3 +171,75 @@ class TestFreightIndicatorNormalizer:
         raw = {"id": "x", "date": "2026-07-18T00:00:00.000", "indicator": "foo"}
         result = DataNormalizer.normalize_freight_indicator(raw)
         assert result is None
+
+
+class TestRailSafetyIncidentNormalizer:
+    def test_train_accident_form54(self) -> None:
+        raw = {
+            "reportkey": "BNSFMT0526112202605",
+            "reportingrailroadcode": "BNSF",
+            "reportingrailroadname": "BNSF Railway Company",
+            "date": "2026-05-31T00:00:00.000",
+            "statename": "NORTH DAKOTA",
+            "countyname": "STARK",
+            "accidenttype": "Derailment",
+            "totalkilledform54": "0",
+            "totalinjuredform54": "0",
+            "totaldamagecost": "44623",
+            "latitude": "46.876573",
+            "longitude": "-102.809469",
+        }
+        result = DataNormalizer.normalize_rail_safety_incident(raw, "train_accident")
+        assert result is not None
+        assert result.railroad_code == "BNSF"
+        assert result.category == "Derailment"
+        assert result.total_killed == 0
+        assert result.damage_cost_usd == 44623.0
+        assert result.latitude == 46.876573
+
+    def test_highway_rail_crossing_form57_uses_different_railroad_fields(self) -> None:
+        # Form 57 uses railroadcode/railroadname, NOT reportingrailroadcode/name
+        # like Form 54 -- real bug found live 2026-08-03.
+        raw = {
+            "reportkey": "AA15197503",
+            "railroadcode": "AA",
+            "railroadname": "Ann Arbor Railroad",
+            "date": "1975-03-17T00:00:00.000",
+            "equipmentinvolved": "Train (units pulling)",
+            "totalkilledform57": "0",
+            "totalinjuredform57": "1",
+            "vehicledamagecost": "500",
+        }
+        result = DataNormalizer.normalize_rail_safety_incident(raw, "highway_rail_crossing")
+        assert result is not None
+        assert result.railroad_code == "AA"
+        assert result.total_injured == 1
+        assert result.damage_cost_usd == 500.0
+
+    def test_null_date_falls_back_to_year_month_day(self) -> None:
+        # Real data quality issue found live: many pre-1990s records have a
+        # null `date` field even though year/month/day are populated, and
+        # Socrata's `order=date desc` sorts those nulls first.
+        raw = {
+            "reportkey": "AA15197503",
+            "date": None,
+            "year": "1975",
+            "month": "03",
+            "day": "17",
+            "totalkilledform57": "0",
+            "totalinjuredform57": "0",
+            "vehicledamagecost": "0",
+        }
+        result = DataNormalizer.normalize_rail_safety_incident(raw, "highway_rail_crossing")
+        assert result is not None
+        assert result.incident_date == date(1975, 3, 17)
+
+    def test_missing_reportkey_returns_none(self) -> None:
+        raw = {"date": "2026-01-01T00:00:00.000"}
+        result = DataNormalizer.normalize_rail_safety_incident(raw, "train_accident")
+        assert result is None
+
+    def test_no_date_and_no_year_month_day_returns_none(self) -> None:
+        raw = {"reportkey": "x", "date": None}
+        result = DataNormalizer.normalize_rail_safety_incident(raw, "train_accident")
+        assert result is None
