@@ -17,8 +17,13 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   fixed on `fix/adversarial-review-findings` → **PR #1** (CI green on 3.11/3.12, GitGuardian
   clean). Review scope was the tree at `bab1b63`; the FMCSA source (added after, `3b0c0f6`)
   was NOT in scope and is not part of PR #1.
-- GitHub email verification resolved 2026-08-03 — pushes unblocked. `3b0c0f6` (FMCSA) still
-  needs pushing to `main`.
+- **FMCSA review round (2026-08-03)**: second review pass over the FMCSA motor carrier census
+  source (`3b0c0f6`), then cherry-picked onto the PR #1 branch (commit `20e164e`) with fixes
+  in `1b32dc9` (F1 `retry_if_transient`, F2 pagination test, E501s). PR #1 now carries FMCSA
+  too. PII story verified clean (server-side `$select`, no `raw_record` field, schema-level
+  test guard). Decision: census stays in the default run (daily full snapshots accumulate on
+  disk; HF dedup keeps the published dataset near current-census-sized).
+- GitHub email verification resolved 2026-08-03 — pushes unblocked.
 
 ## Session log
 
@@ -51,12 +56,9 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
 
 ## Open items
 
-- **Push `3b0c0f6` (FMCSA source) to `main`** — email verification now resolved, push
-  unblocked; this commit predates PR #1 and is not part of it.
-- **Review the FMCSA source** — the adversarial review round covered the tree at
-  `bab1b63`; FMCSA was added after and has not had the same review pass.
-- **Merge/close PR #1** (review fixes, CI green).
+- **Merge/close PR #1** — now carries review fixes (R6) + FMCSA source + its review fixes.
 - **Freightos API key** — external signup; blocks the ocean-freight-rate source only.
 - **EIA / FRED / BLS-PPI keys** (freight-rail R3) — external signups, block the last
   GO-flagged sources.
-- **HuggingFace sync** — current (6 tables / 4.3M rows); re-sync after FMCSA push + merge.
+- **HuggingFace sync** — current (6 tables / 4.3M rows); re-sync after FMCSA merge (will
+  add the motor-carrier-census table).
