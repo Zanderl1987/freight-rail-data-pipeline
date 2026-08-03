@@ -12,21 +12,21 @@ Usage:
 
 Requires HUGGINGFACE_TOKEN or HF_TOKEN env variable (in .env).
 """
+
 from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent / ".env")
-
 from huggingface_hub import HfApi, login
 
 from freight_rail_pipeline.config import PipelineConfig
+
+load_dotenv(Path(__file__).parent / ".env")
 
 EXPORT_DIR = Path(__file__).parent / "data" / "hf_export"
 
@@ -111,6 +111,20 @@ def export_tables(output_dir: Path) -> list[tuple[str, int, int]]:
         if df.empty:
             continue
 
+        # Reruns against the same partition overwrite the file, but a history
+        # fetch written under multiple ingestion dates duplicates every record
+        # (differing only in ingested_at). Dedup on record identity, keeping the
+        # newest ingest timestamp.
+        identity_cols = [c for c in df.columns if c != "ingested_at"]
+        if identity_cols and "ingested_at" in df.columns:
+            df = (
+                df.sort_values("ingested_at")
+                .drop_duplicates(subset=identity_cols, keep="last")
+                .reset_index(drop=True)
+            )
+        if df.empty:
+            continue
+
         out_path = EXPORT_DIR / f"{table_name}.parquet"
         df.to_parquet(out_path, compression="zstd", index=False)
         stats.append((table_name, len(df), out_path.stat().st_size))
@@ -118,7 +132,11 @@ def export_tables(output_dir: Path) -> list[tuple[str, int, int]]:
     return stats
 
 
-def main(repo_name: str = "freight-rail-data-pipeline", private: bool = False) -> None:
+def main(
+    repo_name: str = "freight-rail-data-pipeline",
+    private: bool = False,
+    owner: str = "Zanderl1987",
+) -> None:
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         print("ERROR: Set HUGGINGFACE_TOKEN or HF_TOKEN env variable.")
@@ -142,7 +160,7 @@ def main(repo_name: str = "freight-rail-data-pipeline", private: bool = False) -
     login(token=token)
     api = HfApi()
 
-    repo_id = f"ZanderL1337/{repo_name}"
+    repo_id = f"{owner}/{repo_name}"
     print(f"\nCreating/updating repo: {repo_id} (private={private})")
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
 
@@ -152,7 +170,7 @@ def main(repo_name: str = "freight-rail-data-pipeline", private: bool = False) -
         n_tables=len(stats),
         n_rows=total_rows,
         total_size_mb=total_size_mb,
-        generated_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        generated_date=datetime.now(UTC).strftime("%Y-%m-%d"),
         first_table=stats[0][0],
         table_rows=table_rows,
     )
@@ -174,6 +192,7 @@ def main(repo_name: str = "freight-rail-data-pipeline", private: bool = False) -
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload freight-rail data to HuggingFace")
     parser.add_argument("--repo-name", default="freight-rail-data-pipeline", help="HF repo name")
+    parser.add_argument("--owner", default="Zanderl1987", help="HF user/org that owns the dataset")
     parser.add_argument("--private", action="store_true", help="Make dataset private")
     args = parser.parse_args()
-    main(repo_name=args.repo_name, private=args.private)
+    main(repo_name=args.repo_name, private=args.private, owner=args.owner)

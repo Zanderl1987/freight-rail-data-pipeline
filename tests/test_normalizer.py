@@ -52,6 +52,14 @@ class TestRailCarloadingNormalizer:
         result = DataNormalizer.normalize_rail_carloading(raw)
         assert result is None
 
+    def test_zero_carloads_is_valid(self) -> None:
+        # I1: a reported 0 carloads is a real value, not a missing field --
+        # falsy-zero `or` chains used to drop it.
+        raw = {"railroad": "CSX", "commodity": "Chemicals", "carloads": "0"}
+        result = DataNormalizer.normalize_rail_carloading(raw)
+        assert result is not None
+        assert result.carloads == 0
+
     def test_empty_record(self) -> None:
         result = DataNormalizer.normalize_rail_carloading({})
         assert result is None
@@ -162,7 +170,7 @@ class TestRailServiceMetricNormalizer:
         result = DataNormalizer.normalize_rail_service_metric(raw)
         assert result is not None
         assert result.railroad == "BNSF"
-        assert result.metric_name == "average_train_speed_(mph)"
+        assert result.metric_name == "average_train_speed"
         assert result.metric_value == 24.7
         assert result.unit == "mph"
         assert result.segment == "Automotive"
@@ -180,6 +188,18 @@ class TestRailServiceMetricNormalizer:
         assert DataNormalizer.normalize_rail_service_metric({}) is None
         assert DataNormalizer.normalize_rail_service_metric({"railroad": "BNSF"}) is None
         assert DataNormalizer.normalize_rail_service_metric({"metric_name": "speed"}) is None
+
+    def test_zero_metric_value_is_valid(self) -> None:
+        # I1: a legitimate 0 (e.g. zero dwell hours) must not be treated as missing.
+        raw = {
+            "measure": "Terminal Dwell Time",
+            "date": "2026-07-24T00:00:00.000",
+            "railroad": "BNSF",
+            "value": "0",
+        }
+        result = DataNormalizer.normalize_rail_service_metric(raw)
+        assert result is not None
+        assert result.metric_value == 0
 
 
 class TestOceanFreightRateNormalizer:
@@ -227,6 +247,52 @@ class TestOceanFreightRateNormalizer:
         raw = {"routeCode": "FBX01", "originPort": "CNSHA"}
         result = DataNormalizer.normalize_ocean_freight_rate(raw)
         assert result is None
+
+    def test_zero_rate_is_valid(self) -> None:
+        # I1: a 0 rate must be kept, not dropped as "missing".
+        raw = {
+            "routeCode": "FBX01",
+            "originPort": "CNSHA",
+            "destinationPort": "USLAX",
+            "containerType": "40GP",
+            "rateUsd": 0,
+            "tradeLane": "Trans-Pacific Eastbound",
+            "publishedDate": "2026-07-28",
+        }
+        result = DataNormalizer.normalize_ocean_freight_rate(raw)
+        assert result is not None
+        assert result.rate_usd == 0
+
+    def test_malformed_date_falls_back_to_snapshot_date(self) -> None:
+        # I5: an unparseable publishedDate must not silently stamp today nor
+        # drop the record -- fall back to the run's snapshot date.
+        raw = {
+            "routeCode": "FBX01",
+            "originPort": "CNSHA",
+            "destinationPort": "USLAX",
+            "containerType": "40GP",
+            "rateUsd": 4500,
+            "publishedDate": "not-a-date",
+        }
+        result = DataNormalizer.normalize_ocean_freight_rate(
+            raw, snapshot_date=date(2026, 7, 1)
+        )
+        assert result is not None
+        assert result.snapshot_date == date(2026, 7, 1)
+
+    def test_missing_date_falls_back_to_snapshot_date(self) -> None:
+        raw = {
+            "routeCode": "FBX01",
+            "originPort": "CNSHA",
+            "destinationPort": "USLAX",
+            "containerType": "40GP",
+            "rateUsd": 4500,
+        }
+        result = DataNormalizer.normalize_ocean_freight_rate(
+            raw, snapshot_date=date(2026, 7, 1)
+        )
+        assert result is not None
+        assert result.snapshot_date == date(2026, 7, 1)
 
 
 class TestFreightIndicatorNormalizer:

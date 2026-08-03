@@ -41,12 +41,25 @@ class DataNormalizer:
         return None
 
     @staticmethod
+    def _first_not_none(raw: dict[str, Any], *keys: str) -> Any:
+        """Return the first present value across `keys`.
+
+        Uses `is not None` rather than truthiness so a legitimate `0` is
+        treated as a value, not as a missing field.
+        """
+        for key in keys:
+            value = raw.get(key)
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
     def normalize_rail_carloading(
         raw: dict[str, Any],
         snapshot_date: date | None = None,
     ) -> RailCarloading | None:
         try:
-            carloads_raw = raw.get("carloads") or raw.get("volume") or raw.get("count")
+            carloads_raw = DataNormalizer._first_not_none(raw, "carloads", "volume", "count")
             if carloads_raw is None:
                 return None
 
@@ -112,7 +125,7 @@ class DataNormalizer:
                 or raw.get("metric")
                 or raw.get("indicator")
             )
-            metric_value = raw.get("value") or raw.get("metric_value")
+            metric_value = DataNormalizer._first_not_none(raw, "value", "metric_value")
             railroad = raw.get("railroad") or raw.get("carrier") or raw.get("reporting_railroad")
 
             if not metric_name or metric_value is None or not railroad:
@@ -123,10 +136,16 @@ class DataNormalizer:
 
             unit = raw.get("unit") or _extract_unit(str(metric_name))
 
+            # Strip the unit parenthetical (e.g. "Average Train Speed (mph)")
+            # out of the metric label before slugifying it.
+            metric_label = str(metric_name)
+            if "(" in metric_label:
+                metric_label = metric_label[: metric_label.index("(")].strip()
+
             return RailServiceMetric(
                 snapshot_date=reported,
                 railroad=str(railroad),
-                metric_name=str(metric_name).lower().replace(" ", "_"),
+                metric_name=metric_label.lower().replace(" ", "_"),
                 metric_value=float(metric_value),
                 unit=str(unit),
                 region=raw.get("region"),
@@ -298,17 +317,19 @@ class DataNormalizer:
             return None
 
     @staticmethod
-    def normalize_ocean_freight_rate(raw: dict[str, Any]) -> OceanFreightRate | None:
+    def normalize_ocean_freight_rate(
+        raw: dict[str, Any],
+        snapshot_date: date | None = None,
+    ) -> OceanFreightRate | None:
         try:
-            rate_usd = raw.get("rateUsd") or raw.get("rate_usd") or raw.get("rate")
+            rate_usd = DataNormalizer._first_not_none(raw, "rateUsd", "rate_usd", "rate")
             if rate_usd is None:
                 return None
 
-            published = raw.get("publishedDate") or raw.get("published_date")
-            parsed_date = date.today()
-            if published:
-                if isinstance(published, str):
-                    parsed_date = datetime.fromisoformat(published.replace("Z", "+00:00")).date()
+            published = DataNormalizer._first_not_none(raw, "publishedDate", "published_date")
+            # Fall back to the run's snapshot date (or today) for missing or
+            # malformed dates instead of dropping the record.
+            parsed_date = DataNormalizer._parse_date(published) or snapshot_date or date.today()
 
             return OceanFreightRate(
                 snapshot_date=parsed_date,

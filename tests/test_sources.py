@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +12,7 @@ import responses
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
 from freight_rail_pipeline.sources.fra_safety import FRASafetySource
-from freight_rail_pipeline.sources.freightos_fbx import FreightosFBXSource
+from freight_rail_pipeline.sources.freightos_fbx import FBX_ROUTES, FreightosFBXSource
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
 
 
@@ -316,6 +318,30 @@ class TestFRASafetySource:
         warnings = source.validate()
         assert warnings == []
 
+    @patch("freight_rail_pipeline.sources.fra_safety.Socrata")
+    def test_backfill_uses_null_date_aware_where_clause(
+        self, mock_socrata: MagicMock, source: FRASafetySource
+    ) -> None:
+        # I3: backfilling by date used to filter `where="date='X'"`, which can
+        # never match the many pre-1990 records whose `date` is null. The where
+        # clause must also cover the reconstructed year/month/day parts, using
+        # each form's month column (accidentmonth for Form 54, month for Form 57).
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = []
+
+        source.fetch(snapshot_date=date(1975, 3, 17))
+
+        where_calls = [call.kwargs.get("where") for call in mock_client.get.call_args_list]
+        assert len(where_calls) == 2
+        for where in where_calls:
+            assert where is not None
+            assert "date='1975-03-17'" in where
+            assert "year='1975'" in where
+            assert "day='17'" in where
+        assert "accidentmonth='3'" in where_calls[0] or "accidentmonth='03'" in where_calls[0]
+        assert "month='3'" in where_calls[1] or "month='03'" in where_calls[1]
+
 
 class TestFreightosFBXSource:
     @pytest.fixture
@@ -381,3 +407,78 @@ class TestFreightosFBXSource:
     def test_validate(self, source: FreightosFBXSource) -> None:
         warnings = source.validate()
         assert isinstance(warnings, list)
+
+    @responses.activate
+    def test_all_routes_fail_raises(self, source: FreightosFBXSource) -> None:
+        # C2: every route rejecting the API key used to produce a green run
+        # with zero records -- now it must raise.
+        base = source.config.fbx_base_url
+        for _route in FBX_ROUTES:
+            responses.add(
+                responses.GET,
+                re.compile(rf"{re.escape(base)}.*"),
+                status=401,
+            )
+
+        with pytest.raises(RuntimeError, match="all routes"):
+            source.fetch()
+
+    @responses.activate
+    def test_partial_route_failure_still_returns_other_routes(
+        self, source: FreightosFBXSource
+    ) -> None:
+        base = source.config.fbx_base_url
+        # One route rejects the key; every other route succeeds. The run should
+        # still return data for the healthy routes (and not raise).
+        first_route = FBX_ROUTES[0]
+
+        def route_callback(request: responses.PreparedRequest) -> tuple[int, dict[str, str], str]:
+            if first_route["origin"] in request.url:
+                return 401, {}, '{"error": "unauthorized"}'
+            return (
+                200,
+                {},
+                json.dumps(
+                    [
+                        {
+                            "routeCode": "FBX01",
+                            "originPort": "CNSHA",
+                            "destinationPort": "USLAX",
+                            "containerType": "40GP",
+                            "rateUsd": 4200,
+                            "tradeLane": "Trans-Pacific Eastbound",
+                            "publishedDate": "2026-07-28",
+                        }
+                    ]
+                ),
+            )
+
+        responses.add_callback(
+            responses.GET,
+            re.compile(rf"{re.escape(base)}.*"),
+            callback=route_callback,
+        )
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count > 0
+
+    @responses.activate
+    def test_validate_401_returns_warning(self, source: FreightosFBXSource) -> None:
+        keyed_source = FreightosFBXSource(
+            PipelineConfig(output_dir="tests/_test_output", fbx_api_key="test-key")
+        )
+        base = keyed_source.config.fbx_base_url
+        responses.add(responses.GET, re.compile(rf"{re.escape(base)}.*"), status=401)
+        warnings = keyed_source.validate()
+        assert any("401" in w for w in warnings)
+
+    @responses.activate
+    def test_validate_200_returns_no_warning(self, source: FreightosFBXSource) -> None:
+        keyed_source = FreightosFBXSource(
+            PipelineConfig(output_dir="tests/_test_output", fbx_api_key="test-key")
+        )
+        base = keyed_source.config.fbx_base_url
+        responses.add(responses.GET, re.compile(rf"{re.escape(base)}.*"), status=200, json=[])
+        warnings = keyed_source.validate()
+        assert warnings == []

@@ -25,7 +25,10 @@ DATA_DIR = Path(os.getenv("FREIGHT_PIPELINE_DATA_DIR", "data"))
 
 @st.cache_data(ttl=60)
 def load_data(table_name: str) -> pd.DataFrame:
-    pattern = str(DATA_DIR / "**" / "**" / "**" / f"{table_name}.parquet")
+    # Exact layout: <DATA_DIR>/freight/<table>/year=YYYY/month=MM/day=DD/<table>.parquet
+    # A multi-** glob like "**/**/**/<table>.parquet" matches each file once per
+    # way the ** groups can absorb directories, inflating charts ~21x.
+    pattern = str(DATA_DIR / "freight" / "**" / f"{table_name}.parquet")
     files = glob.glob(pattern, recursive=True)
     if not files:
         return pd.DataFrame()
@@ -39,7 +42,7 @@ def load_data(table_name: str) -> pd.DataFrame:
             continue
     if not dfs:
         return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+    return pd.concat(dfs, ignore_index=True).drop_duplicates().reset_index(drop=True)
 
 
 @st.cache_data(ttl=300)

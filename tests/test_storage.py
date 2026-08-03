@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.parquet as pq
+import pytest
 
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.models.schemas import (
@@ -117,3 +117,33 @@ class TestStorageWriter:
         ])
         writer.write_carloadings(batch)
         assert len(writer.list_written()) > 0
+
+    def test_batch_partitions_on_ingestion_date_not_record_date(self) -> None:
+        # C1: the whole batch is keyed on the ingestion date (dt), never on the
+        # first record's snapshot_date -- a history fetch mislabels a year of
+        # records under one record's date.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        batch = RailCarloadingBatch(records=[
+            RailCarloading(snapshot_date=date(2020, 1, 15), railroad="BNSF", commodity="Grain", carloads=1500),
+            RailCarloading(snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200),
+        ])
+        writer.write_carloadings(batch, dt=date(2026, 7, 15))
+
+        written = list(self._test_dir.rglob("rail_carloadings.parquet"))
+        assert len(written) == 1
+        assert "year=2026" in str(written[0])
+        assert "year=2020" not in str(written[0])
+
+    def test_unknown_table_raises(self) -> None:
+        # I4: an unknown table used to write a 0-row parquet while logging
+        # success -- now it fails loudly.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        batch = RailCarloadingBatch(records=[
+            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500),
+        ])
+        with pytest.raises(ValueError, match="Unknown table"):
+            writer._write_table("no_such_table", batch.records, dt=date(2026, 7, 15))
