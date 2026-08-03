@@ -54,6 +54,9 @@ test = [
     "pytest-mock>=3.12",
     "responses>=0.25",
 ]
+hf = [
+    "huggingface_hub>=0.35",
+]
 
 [project.scripts]
 freight-pipe = "freight_rail_pipeline.reporting.cli:main"

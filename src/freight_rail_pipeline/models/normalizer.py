@@ -54,7 +54,7 @@ class DataNormalizer:
                 railroad=str(raw.get("railroad", raw.get("carrier", "unknown"))),
                 commodity=str(raw.get("commodity", raw.get("commodity_desc", "unknown"))),
                 traffic_type=raw.get("type") or raw.get("traffic_type"),
-                carloads=int(carloads_raw),
+                carloads=float(carloads_raw),
                 units=raw.get("units", "carloads"),
                 origin_region=raw.get("origin", raw.get("origin_region")),
                 destination_region=raw.get("destination", raw.get("destination_region")),
@@ -124,7 +124,7 @@ class DataNormalizer:
                 ),
                 trade_lane=str(raw.get("tradeRoute", raw.get("trade_lane", "unknown"))),
                 container_type=str(raw.get("containerType", raw.get("container_type", "40GP"))),
-                rate_usd=int(rate_usd),
+                rate_usd=float(rate_usd),
                 region=raw.get("region"),
                 raw_record=raw,
             )
