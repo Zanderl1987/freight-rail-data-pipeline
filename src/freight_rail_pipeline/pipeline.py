@@ -10,6 +10,7 @@ from . import sources as src
 from .config import PipelineConfig
 from .logging_setup import setup_logging
 from .models.schemas import (
+    FreightIndicatorBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
@@ -46,6 +47,7 @@ class FreightPipeline:
         self._sources: dict[str, src.BaseSource] = {
             "usda": src.USDAgTransportSource(self.config),
             "fbx": src.FreightosFBXSource(self.config),
+            "bts": src.BTSFreightIndicatorsSource(self.config),
         }
 
     def run(
@@ -156,6 +158,13 @@ class FreightPipeline:
         if of_records:
             written += self.storage.write_ocean_rates(
                 OceanFreightRateBatch(records=of_records),
+                dt=snapshot_date,
+            )
+
+        fi_records = [r for r in records if type(r).__name__ == "FreightIndicator"]
+        if fi_records:
+            written += self.storage.write_freight_indicators(
+                FreightIndicatorBatch(records=fi_records),
                 dt=snapshot_date,
             )
 

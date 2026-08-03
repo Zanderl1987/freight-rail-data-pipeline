@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .schemas import (
+    FreightIndicator,
     OceanFreightRate,
     RailCarloading,
     RailServiceMetric,
@@ -99,6 +100,34 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize rail service metric: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def normalize_freight_indicator(raw: dict[str, Any]) -> FreightIndicator | None:
+        try:
+            external_id = raw.get("id")
+            indicator = raw.get("indicator")
+            value_raw = raw.get("value1")
+            if external_id is None or indicator is None or value_raw is None:
+                return None
+
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            if record_date is None:
+                return None
+
+            return FreightIndicator(
+                external_id=str(external_id),
+                snapshot_date=record_date,
+                indicator=str(indicator),
+                measure1=raw.get("measure1"),
+                measure2=raw.get("measure2"),
+                value=float(value_raw),
+                units=raw.get("units"),
+                underlying_source=raw.get("source"),
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize freight indicator: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod

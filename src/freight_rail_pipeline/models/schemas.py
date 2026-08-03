@@ -110,6 +110,36 @@ class OceanFreightRateBatch(BaseModel):
         return len(self.records)
 
 
+class FreightIndicator(BaseModel):
+    """A single dated observation from BTS's Supply Chain and Freight Indicators
+    dataset -- a multimodal series (truck spot rates, rail dwell/speed, port
+    container throughput, diesel prices, PPI trucking, etc.), one row per
+    indicator/date/breakdown combination rather than a fixed rail-only shape."""
+
+    source: str = Field(default="bts_freight_indicators")
+    external_id: str = Field(..., description="BTS's own row id, e.g. '59_2026_07_18_Memphis, TN_BNSF'")
+    snapshot_date: date = Field(..., description="Date of the reported observation")
+    indicator: str = Field(..., description="Indicator name, e.g. 'Truck Spot Rates in $ per Mile by Truck Type'")
+    measure1: str | None = Field(default=None, description="Primary breakdown dimension, e.g. terminal or truck type")
+    measure2: str | None = Field(default=None, description="Secondary breakdown dimension, e.g. railroad name")
+    value: float = Field(..., description="Observed value")
+    units: str | None = Field(default=None, description="Unit of the value, e.g. 'Hours', 'Dollars per mile'")
+    underlying_source: str | None = Field(
+        default=None, description="BTS's cited data provider, e.g. 'DAT Freight and Analytics'"
+    )
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class FreightIndicatorBatch(BaseModel):
+    records: list[FreightIndicator]
+    source: str = "bts_freight_indicators"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class PipelineRunSummary(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     started_at: datetime = Field(...)

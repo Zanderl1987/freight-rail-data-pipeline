@@ -133,3 +133,41 @@ class TestOceanFreightRateNormalizer:
         raw = {"routeCode": "FBX01", "originPort": "CNSHA"}
         result = DataNormalizer.normalize_ocean_freight_rate(raw)
         assert result is None
+
+
+class TestFreightIndicatorNormalizer:
+    def test_valid_record_with_measures(self) -> None:
+        raw = {
+            "id": "59_2026_07_18_Memphis, TN_BNSF",
+            "date": "2026-07-18T00:00:00.000",
+            "indicator": "Average Dwell Time at Class I Railroad Terminals",
+            "measure1": "Memphis, TN",
+            "measure2": "BNSF",
+            "value1": "18.9",
+            "units": "Hours",
+            "source": "Surface Transportation Board (STB)",
+        }
+        result = DataNormalizer.normalize_freight_indicator(raw)
+        assert result is not None
+        assert result.external_id == "59_2026_07_18_Memphis, TN_BNSF"
+        assert result.value == 18.9
+        assert result.measure1 == "Memphis, TN"
+        assert result.underlying_source == "Surface Transportation Board (STB)"
+
+    def test_valid_record_no_measures(self) -> None:
+        raw = {
+            "id": "20_2026_07_18",
+            "date": "2026-07-18T00:00:00.000",
+            "indicator": "U.S. Class I Total Rail Non-Intermodal Carloads",
+            "value1": "256117",
+            "units": "Carloads",
+        }
+        result = DataNormalizer.normalize_freight_indicator(raw)
+        assert result is not None
+        assert result.measure1 is None
+        assert result.value == 256117.0
+
+    def test_missing_value_returns_none(self) -> None:
+        raw = {"id": "x", "date": "2026-07-18T00:00:00.000", "indicator": "foo"}
+        result = DataNormalizer.normalize_freight_indicator(raw)
+        assert result is None

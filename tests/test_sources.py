@@ -7,6 +7,7 @@ import pytest
 import responses
 
 from freight_rail_pipeline.config import PipelineConfig
+from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
 from freight_rail_pipeline.sources.freightos_fbx import FreightosFBXSource
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
 
@@ -89,6 +90,76 @@ class TestUSDAgTransportSource:
         assert isinstance(warnings, list)
         assert warnings == []
         assert mock_client.get.call_count == len(source.config.usda_socrata_resource_ids)
+
+
+class TestBTSFreightIndicatorsSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> BTSFreightIndicatorsSource:
+        return BTSFreightIndicatorsSource(config)
+
+    @patch("freight_rail_pipeline.sources.bts_freight_indicators.Socrata")
+    def test_fetch_returns_normalized_records(
+        self, mock_socrata: MagicMock, source: BTSFreightIndicatorsSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        # Real shape confirmed live 2026-08-03 against data.bts.gov/resource/y5ut-ibwt.json
+        mock_client.get.return_value = [
+            {
+                "id": "59_2026_07_18_Memphis, TN_BNSF",
+                "date": "2026-07-18T00:00:00.000",
+                "year": "2026",
+                "indicator": "Average Dwell Time at Class I Railroad Terminals",
+                "measure1": "Memphis, TN",
+                "measure2": "BNSF",
+                "measure1_description": "Terminal",
+                "measure2_description": "Railroad name",
+                "value1": "18.9",
+                "units": "Hours",
+                "source": "Surface Transportation Board (STB)",
+            }
+        ]
+
+        result = source.fetch(snapshot_date=None)
+        assert result.success is True
+        assert result.record_count == 1
+        assert result.source_name == "bts_freight_indicators"
+
+        rec = result.records[0]
+        assert rec.external_id == "59_2026_07_18_Memphis, TN_BNSF"
+        assert rec.indicator == "Average Dwell Time at Class I Railroad Terminals"
+        assert rec.measure1 == "Memphis, TN"
+        assert rec.measure2 == "BNSF"
+        assert rec.value == 18.9
+        assert rec.units == "Hours"
+        assert rec.underlying_source == "Surface Transportation Board (STB)"
+
+    @patch("freight_rail_pipeline.sources.bts_freight_indicators.Socrata")
+    def test_fetch_handles_empty_response(
+        self, mock_socrata: MagicMock, source: BTSFreightIndicatorsSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = []
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 0
+
+    @patch("freight_rail_pipeline.sources.bts_freight_indicators.Socrata")
+    def test_validate_connectivity(
+        self, mock_socrata: MagicMock, source: BTSFreightIndicatorsSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = [{"date": "2026-07-18T00:00:00.000"}]
+
+        warnings = source.validate()
+        assert warnings == []
 
 
 class TestFreightosFBXSource:

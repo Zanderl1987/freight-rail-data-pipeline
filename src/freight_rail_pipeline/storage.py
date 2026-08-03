@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .config import PipelineConfig
 from .models.schemas import (
+    FreightIndicatorBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
     RailCarloadingBatch,
@@ -92,6 +93,21 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "freight_indicators": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("external_id", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("indicator", pa.utf8()),
+                pa.field("measure1", pa.utf8(), nullable=True),
+                pa.field("measure2", pa.utf8(), nullable=True),
+                pa.field("value", pa.float64()),
+                pa.field("units", pa.utf8(), nullable=True),
+                pa.field("underlying_source", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     return schemas.get(table_name, pa.schema([]))
 
@@ -140,6 +156,15 @@ class StorageWriter:
         if not batch.records:
             return 0
         return self._write_table("ocean_freight_rates", batch.records, dt)
+
+    def write_freight_indicators(
+        self,
+        batch: FreightIndicatorBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("freight_indicators", batch.records, dt)
 
     def _write_table(
         self,
