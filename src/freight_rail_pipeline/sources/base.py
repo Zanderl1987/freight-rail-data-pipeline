@@ -6,18 +6,34 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Generic, TypeVar
 
-from tenacity import (
-    before_sleep_log,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential_jitter,
-)
+import requests
+from tenacity import retry_if_exception
 
 from ..config import PipelineConfig
 
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry only transient failures -- network errors, timeouts, 429/5xx.
+
+    Matches DECISION-007 ("fail fast on 4xx"): a 4xx response must not be
+    retried. Covers requests.HTTPError and sodapy.SocrataError (which carries
+    the failing status on `status`/`status_code`) plus IOError raised by the
+    FBX source for a 429.
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError, IOError)):
+        return True
+    if isinstance(exc, requests.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    else:
+        status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    return isinstance(status, int) and status >= 500
+
+
+retry_if_transient = retry_if_exception(_is_retryable)
 
 
 @dataclass
@@ -45,15 +61,6 @@ class BaseSource(ABC):
 
     @abstractmethod
     def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[Any]: ...
-
-    def _build_retry_decorator(self) -> dict[str, Any]:
-        return {
-            "stop": stop_after_attempt(self.config.max_retries),
-            "wait": wait_exponential_jitter(initial=2, max=60, jitter=2),
-            "retry": retry_if_exception_type((ConnectionError, TimeoutError, IOError)),
-            "before_sleep": before_sleep_log(log, logging.WARNING),
-            "reraise": True,
-        }
 
     def get_credential(self, key: str) -> str | None:
         import os

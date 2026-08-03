@@ -120,3 +120,46 @@ class TestFreightPipeline:
         pipeline = FreightPipeline(config)
         assert config.output_dir.exists()
         assert config.log_dir.exists()
+
+    def test_unknown_source_raises(self) -> None:
+        config = self.make_config()
+        pipeline = FreightPipeline(config)
+        with pytest.raises(ValueError, match="Unknown source"):
+            pipeline.run(sources=["usda", "not_a_source"])
+
+    @patch("freight_rail_pipeline.pipeline.src.FreightosFBXSource.fetch")
+    def test_soft_failure_sets_success_false(
+        self, mock_fbx: object
+    ) -> None:
+        # Missed-4: a source returning success=False must mark the run failed
+        # instead of being recorded as a success.
+        config = self.make_config()
+        pipeline = FreightPipeline(config)
+
+        mock_fbx.side_effect = lambda *a, **kw: SourceResult(  # type: ignore[attr-defined]
+            records=[], source_name="freightos_fbx", success=False, error="API rejected key"
+        )
+
+        result = pipeline.run(sources=["fbx"])
+        assert result.success is False
+        assert "fbx" in result.failed_sources
+        assert any("API rejected key" in e for e in result.errors)
+
+    @patch("freight_rail_pipeline.pipeline.src.FreightosFBXSource.fetch")
+    def test_run_id_unique_across_runs(self, mock_fbx: object) -> None:
+        # M1: back-to-back runs must not collide on a second-resolution run_id.
+        config = self.make_config()
+        pipeline = FreightPipeline(config)
+
+        mock_fbx.side_effect = lambda *a, **kw: SourceResult(  # type: ignore[attr-defined]
+            records=[], source_name="freightos_fbx"
+        )
+
+        first = pipeline.run(sources=["fbx"])
+        second = pipeline.run(sources=["fbx"])
+        assert first.run_id != second.run_id
+
+        runs_dir = self._test_dir / "data" / "pipeline_runs"
+        summaries = list(runs_dir.glob("*.json"))
+        assert len(summaries) == 2
+        assert {s.stem for s in summaries} == {first.run_id, second.run_id}

@@ -117,13 +117,24 @@ class FreightIndicator(BaseModel):
     indicator/date/breakdown combination rather than a fixed rail-only shape."""
 
     source: str = Field(default="bts_freight_indicators")
-    external_id: str = Field(..., description="BTS's own row id, e.g. '59_2026_07_18_Memphis, TN_BNSF'")
+    external_id: str = Field(
+        ..., description="BTS's own row id, e.g. '59_2026_07_18_Memphis, TN_BNSF'"
+    )
     snapshot_date: date = Field(..., description="Date of the reported observation")
-    indicator: str = Field(..., description="Indicator name, e.g. 'Truck Spot Rates in $ per Mile by Truck Type'")
-    measure1: str | None = Field(default=None, description="Primary breakdown dimension, e.g. terminal or truck type")
-    measure2: str | None = Field(default=None, description="Secondary breakdown dimension, e.g. railroad name")
+    indicator: str = Field(
+        ...,
+        description="Indicator name, e.g. 'Truck Spot Rates in $ per Mile by Truck Type'",
+    )
+    measure1: str | None = Field(
+        default=None, description="Primary breakdown dimension, e.g. terminal or truck type"
+    )
+    measure2: str | None = Field(
+        default=None, description="Secondary breakdown dimension, e.g. railroad name"
+    )
     value: float = Field(..., description="Observed value")
-    units: str | None = Field(default=None, description="Unit of the value, e.g. 'Hours', 'Dollars per mile'")
+    units: str | None = Field(
+        default=None, description="Unit of the value, e.g. 'Hours', 'Dollars per mile'"
+    )
     underlying_source: str | None = Field(
         default=None, description="BTS's cited data provider, e.g. 'DAT Freight and Analytics'"
     )
@@ -149,7 +160,9 @@ class RailSafetyIncident(BaseModel):
 
     source: str = Field(default="fra_safety")
     external_id: str = Field(..., description="FRA's reportkey/incidentkey, unique per event")
-    incident_type: str = Field(..., description="'train_accident' (Form 54) or 'highway_rail_crossing' (Form 57)")
+    incident_type: str = Field(
+        ..., description="'train_accident' (Form 54) or 'highway_rail_crossing' (Form 57)"
+    )
     incident_date: date = Field(..., description="Date the incident occurred")
     railroad_code: str | None = Field(default=None, description="Reporting railroad's FRA code")
     railroad_name: str | None = Field(default=None, description="Reporting railroad name")
@@ -190,9 +203,13 @@ class MotorCarrierCensus(BaseModel):
     source: str = Field(default="fmcsa_carrier_census")
     snapshot_date: date = Field(..., description="MCS-150 census filing date")
     dot_number: str = Field(..., description="FMCSA DOT number (carrier's public registration ID)")
-    carrier_operation: str | None = Field(default=None, description="Interstate/intrastate operation code")
+    carrier_operation: str | None = Field(
+        default=None, description="Interstate/intrastate operation code"
+    )
     state: str | None = Field(default=None, description="Physical location state")
-    power_units: int | None = Field(default=None, ge=0, description="Number of power units (trucks/tractors)")
+    power_units: int | None = Field(
+        default=None, ge=0, description="Number of power units (trucks/tractors)"
+    )
     driver_count: int | None = Field(default=None, ge=0, description="Total drivers")
     mileage: int | None = Field(default=None, ge=0, description="Most recent annual mileage")
     mileage_year: int | None = Field(default=None, description="Year the mileage figure applies to")

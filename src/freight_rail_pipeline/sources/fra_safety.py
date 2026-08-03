@@ -10,7 +10,7 @@ from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponenti
 from ..config import PipelineConfig
 from ..models import RailSafetyIncident
 from ..models.normalizer import DataNormalizer
-from .base import BaseSource, SourceResult
+from .base import BaseSource, SourceResult, retry_if_transient
 
 log = logging.getLogger(__name__)
 
@@ -44,23 +44,31 @@ class FRASafetySource(BaseSource):
                 client.get(resource_id, limit=1)
                 self.log.info("FRA Safety resource %s (%s) verified", incident_type, resource_id)
             except Exception as exc:
-                warnings.append(f"FRA Safety resource {incident_type} ({resource_id}) failed: {exc}")
+                warnings.append(
+                    f"FRA Safety resource {incident_type} ({resource_id}) failed: {exc}"
+                )
             finally:
                 self._close_client()
         return warnings
 
-    def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[RailSafetyIncident]:
+    def fetch(
+        self, snapshot_date: date | None = None, **kwargs: Any
+    ) -> SourceResult[RailSafetyIncident]:
         self.log.info("Fetching rail safety incidents from FRA...")
         normalizer = DataNormalizer()
         normalized: list[RailSafetyIncident] = []
         raw_counts: dict[str, int] = {}
 
         for incident_type, resource_id in RESOURCE_IDS.items():
-            raw_results = self._fetch_incidents(resource_id, snapshot_date)
+            # Form 54 uses `accidentmonth`; Form 57 uses a plain `month` field.
+            month_col = "accidentmonth" if incident_type == "train_accident" else "month"
+            raw_results = self._fetch_incidents(resource_id, snapshot_date, month_col=month_col)
             raw_counts[incident_type] = len(raw_results)
             for raw in raw_results:
                 record = normalizer.normalize_rail_safety_incident(raw, incident_type)
-                if record is not None:
+                if record is not None and (
+                    snapshot_date is None or record.incident_date == snapshot_date
+                ):
                     normalized.append(record)
 
         return SourceResult(
@@ -78,15 +86,28 @@ class FRASafetySource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_incidents(
-        self, resource_id: str, snapshot_date: date | None = None
+        self,
+        resource_id: str,
+        snapshot_date: date | None = None,
+        month_col: str = "month",
     ) -> list[dict[str, Any]]:
         client = self._get_client()
         try:
             where_clause = ""
             if snapshot_date:
-                where_clause = f"date='{snapshot_date.isoformat()}'"
+                # Many pre-1990 records have a null `date` even though
+                # year/month/day are populated. A plain `date='X'` filter can
+                # never match those, so widen the fetch with the reconstructed
+                # parts and filter exactly in `fetch()`.
+                where_clause = (
+                    f"date='{snapshot_date.isoformat()}' OR "
+                    f"(year='{snapshot_date.year}' AND day='{snapshot_date.day}' "
+                    f"AND ({month_col}='{snapshot_date.month}' "
+                    f"OR {month_col}='{snapshot_date.month:02d}'))"
+                )
 
             results: list[dict[str, Any]] = []
             page = 0

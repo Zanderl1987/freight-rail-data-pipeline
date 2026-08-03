@@ -10,7 +10,7 @@ from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponenti
 from ..config import PipelineConfig
 from ..models import RailServiceMetric
 from ..models.normalizer import DataNormalizer
-from .base import BaseSource, SourceResult
+from .base import BaseSource, SourceResult, retry_if_transient
 
 log = logging.getLogger(__name__)
 
@@ -59,9 +59,7 @@ class USDAgTransportSource(BaseSource):
             if metric_record is not None:
                 combined.append(metric_record)
         for raw in grain_carloads_result.records:
-            grain_record = normalizer.normalize_grain_rail_carload(
-                raw, snapshot_date=snapshot_date
-            )
+            grain_record = normalizer.normalize_grain_rail_carload(raw, snapshot_date=snapshot_date)
             if grain_record is not None:
                 combined.append(grain_record)
         for raw in grain_tariffs_result.records:
@@ -107,6 +105,7 @@ class USDAgTransportSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_carloadings(self, snapshot_date: date | None = None) -> SourceResult[dict[str, Any]]:
         resource_id = self.config.usda_socrata_resource_ids["rail_carloadings"]
@@ -148,6 +147,7 @@ class USDAgTransportSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_service_metrics(
         self, snapshot_date: date | None = None
@@ -191,6 +191,7 @@ class USDAgTransportSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_grain_rail_carloads(
         self, snapshot_date: date | None = None
@@ -234,6 +235,7 @@ class USDAgTransportSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_grain_rail_tariff_rates(
         self, snapshot_date: date | None = None
