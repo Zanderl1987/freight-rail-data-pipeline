@@ -203,9 +203,13 @@ class MotorCarrierCensus(BaseModel):
     source: str = Field(default="fmcsa_carrier_census")
     snapshot_date: date = Field(..., description="MCS-150 census filing date")
     dot_number: str = Field(..., description="FMCSA DOT number (carrier's public registration ID)")
-    carrier_operation: str | None = Field(default=None, description="Interstate/intrastate operation code")
+    carrier_operation: str | None = Field(
+        default=None, description="Interstate/intrastate operation code"
+    )
     state: str | None = Field(default=None, description="Physical location state")
-    power_units: int | None = Field(default=None, ge=0, description="Number of power units (trucks/tractors)")
+    power_units: int | None = Field(
+        default=None, ge=0, description="Number of power units (trucks/tractors)"
+    )
     driver_count: int | None = Field(default=None, ge=0, description="Total drivers")
     mileage: int | None = Field(default=None, ge=0, description="Most recent annual mileage")
     mileage_year: int | None = Field(default=None, description="Year the mileage figure applies to")

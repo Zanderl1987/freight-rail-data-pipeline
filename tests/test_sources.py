@@ -417,6 +417,30 @@ class TestFMCSACarrierCensusSource:
         warnings = source.validate()
         assert warnings == []
 
+    @patch("freight_rail_pipeline.sources.fmcsa_carrier_census.Socrata")
+    def test_fetch_paginates_through_full_census(
+        self, mock_socrata: MagicMock, source: FMCSACarrierCensusSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        # The real dataset is 2M+ rows; the loop walks pages of `limit` until a
+        # short final page. Full first page (exactly `limit`) forces another
+        # call, then a 1-row page terminates the loop.
+        limit = 5000
+        full_page = [
+            {"dot_number": str(i), "phy_state": "AL", "mcs150_date": "21-APR-26"}
+            for i in range(limit)
+        ]
+        last_page = [{"dot_number": "5000", "phy_state": "AL", "mcs150_date": "21-APR-26"}]
+        mock_client.get.side_effect = [full_page, last_page]
+
+        result = source.fetch(snapshot_date=None)
+        assert result.success is True
+        assert result.record_count == limit + 1
+
+        offsets = [call.kwargs["offset"] for call in mock_client.get.call_args_list]
+        assert offsets == [0, limit]
+
 
 class TestFreightosFBXSource:
     @pytest.fixture
