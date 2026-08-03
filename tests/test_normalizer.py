@@ -8,20 +8,19 @@ from freight_rail_pipeline.models.normalizer import DataNormalizer
 class TestRailCarloadingNormalizer:
     def test_valid_record(self) -> None:
         raw = {
+            "date": "2026-07-25T00:00:00.000",
             "railroad": "BNSF",
             "commodity": "Grain",
-            "carloads": 1500,
-            "origin": "ND",
-            "destination": "TX",
+            "type": "Originated",
+            "carloads": "1500",
         }
-        result = DataNormalizer.normalize_rail_carloading(raw, snapshot_date=date(2026, 7, 15))
+        result = DataNormalizer.normalize_rail_carloading(raw)
         assert result is not None
         assert result.railroad == "BNSF"
         assert result.commodity == "Grain"
         assert result.carloads == 1500
-        assert result.origin_region == "ND"
-        assert result.destination_region == "TX"
-        assert result.snapshot_date == date(2026, 7, 15)
+        assert result.traffic_type == "Originated"
+        assert result.snapshot_date == date(2026, 7, 25)
         assert result.source == "usda_agtransport"
 
     def test_alternative_field_names(self) -> None:
@@ -31,6 +30,12 @@ class TestRailCarloadingNormalizer:
         assert result.railroad == "UP"
         assert result.commodity == "Coal"
         assert result.carloads == 5000
+
+    def test_snapshot_date_fallback(self) -> None:
+        raw = {"railroad": "CSX", "commodity": "Chemicals", "carloads": 400}
+        result = DataNormalizer.normalize_rail_carloading(raw, snapshot_date=date(2026, 7, 15))
+        assert result is not None
+        assert result.snapshot_date == date(2026, 7, 15)
 
     def test_missing_carloads_returns_none(self) -> None:
         raw = {"railroad": "CSX", "commodity": "Chemicals"}
@@ -45,19 +50,20 @@ class TestRailCarloadingNormalizer:
 class TestRailServiceMetricNormalizer:
     def test_valid_record(self) -> None:
         raw = {
-            "railroad": "NS",
-            "metric_name": "Train Speed",
-            "metric_value": 22.5,
-            "unit": "mph",
-            "region": "East",
+            "measure": "Average Train Speed (mph)",
+            "date": "2026-07-24T00:00:00.000",
+            "railroad": "BNSF",
+            "variable": "Automotive",
+            "value": "24.7",
         }
-        result = DataNormalizer.normalize_rail_service_metric(raw, snapshot_date=date(2026, 7, 15))
+        result = DataNormalizer.normalize_rail_service_metric(raw)
         assert result is not None
-        assert result.railroad == "NS"
-        assert result.metric_name == "train_speed"
-        assert result.metric_value == 22.5
+        assert result.railroad == "BNSF"
+        assert result.metric_name == "average_train_speed_(mph)"
+        assert result.metric_value == 24.7
         assert result.unit == "mph"
-        assert result.region == "East"
+        assert result.segment == "Automotive"
+        assert result.snapshot_date == date(2026, 7, 24)
 
     def test_alternative_field_names(self) -> None:
         raw = {"reporting_railroad": "UP", "indicator": "terminal dwell", "value": "12.3"}

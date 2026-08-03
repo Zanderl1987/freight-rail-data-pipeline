@@ -29,12 +29,13 @@ class PipelineConfig:
 
     usda_socrata_resource_ids: dict[str, str] = field(
         default_factory=lambda: {
-            "rail_carloadings": "swcm-ytjc",
-            "rail_service_metrics": "jvfn-6e7j",
+            "rail_carloadings": "tb7q-kn5i",
+            "rail_service_metrics": "axkm-yjzy",
         }
     )
 
     fbx_base_url: str = "https://api.freightos.com/fd_external_apis/price_stats"
+    fbx_api_key: str = os.getenv("FREIGHTOS_FBX_API_KEY", "")
 
     @classmethod
     def from_env(cls) -> PipelineConfig:

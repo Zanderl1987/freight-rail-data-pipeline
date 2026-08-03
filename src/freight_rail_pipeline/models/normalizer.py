@@ -13,7 +13,29 @@ from .schemas import (
 log = logging.getLogger(__name__)
 
 
+def _extract_unit(metric_name: str) -> str:
+    """Extract a unit from a measure label like '... (Hours)' or '... (mph)'."""
+    if "(" in metric_name and metric_name.rstrip().endswith(")"):
+        inner = metric_name.split("(", 1)[1].rstrip(")").strip()
+        if inner:
+            return inner.lower()
+    return "unknown"
+
+
 class DataNormalizer:
+    @staticmethod
+    def _parse_date(value: Any) -> date | None:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            except ValueError:
+                return None
+        return None
+
     @staticmethod
     def normalize_rail_carloading(
         raw: dict[str, Any],
@@ -24,10 +46,14 @@ class DataNormalizer:
             if carloads_raw is None:
                 return None
 
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            reported = record_date or snapshot_date or date.today()
+
             return RailCarloading(
-                snapshot_date=snapshot_date or date.today(),
+                snapshot_date=reported,
                 railroad=str(raw.get("railroad", raw.get("carrier", "unknown"))),
                 commodity=str(raw.get("commodity", raw.get("commodity_desc", "unknown"))),
+                traffic_type=raw.get("type") or raw.get("traffic_type"),
                 carloads=int(carloads_raw),
                 units=raw.get("units", "carloads"),
                 origin_region=raw.get("origin", raw.get("origin_region")),
@@ -44,20 +70,31 @@ class DataNormalizer:
         snapshot_date: date | None = None,
     ) -> RailServiceMetric | None:
         try:
-            metric_name = raw.get("metric_name") or raw.get("metric") or raw.get("indicator")
-            metric_value = raw.get("metric_value") or raw.get("value")
+            metric_name = (
+                raw.get("measure")
+                or raw.get("metric_name")
+                or raw.get("metric")
+                or raw.get("indicator")
+            )
+            metric_value = raw.get("value") or raw.get("metric_value")
             railroad = raw.get("railroad") or raw.get("carrier") or raw.get("reporting_railroad")
 
             if not metric_name or metric_value is None or not railroad:
                 return None
 
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            reported = record_date or snapshot_date or date.today()
+
+            unit = raw.get("unit") or _extract_unit(str(metric_name))
+
             return RailServiceMetric(
-                snapshot_date=snapshot_date or date.today(),
+                snapshot_date=reported,
                 railroad=str(railroad),
                 metric_name=str(metric_name).lower().replace(" ", "_"),
                 metric_value=float(metric_value),
-                unit=str(raw.get("unit", "unknown")),
+                unit=str(unit),
                 region=raw.get("region"),
+                segment=raw.get("variable") or raw.get("segment"),
                 raw_record=raw,
             )
         except (ValueError, TypeError, KeyError) as exc:

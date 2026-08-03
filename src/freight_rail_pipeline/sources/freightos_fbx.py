@@ -98,10 +98,21 @@ class FreightosFBXSource(BaseSource):
 
     def validate(self) -> list[str]:
         warnings: list[str] = []
+        if not self.config.fbx_api_key:
+            warnings.append(
+                "Freightos FBX API now requires an API key (FREIGHTOS_FBX_API_KEY); "
+                "fetch will fail with HTTP 401 without it"
+            )
+            return warnings
         try:
-            resp = requests.get(f"{self.base_url}/", timeout=self.config.request_timeout_seconds)
-            if resp.status_code == 200 or resp.status_code == 404:
-                self.log.info("Freightos API endpoint reachable (HTTP %d)", resp.status_code)
+            headers = self._request_headers()
+            resp = requests.get(
+                f"{self.base_url}/",
+                headers=headers,
+                timeout=self.config.request_timeout_seconds,
+            )
+            if resp.status_code in (200, 401, 404):
+                self.log.info("Freightos API reachable (HTTP %d)", resp.status_code)
             else:
                 warnings.append(f"Freightos API returned HTTP {resp.status_code}")
         except requests.ConnectionError as exc:
@@ -149,6 +160,12 @@ class FreightosFBXSource(BaseSource):
                     )
         return results
 
+    def _request_headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.config.fbx_api_key:
+            headers["apikey"] = self.config.fbx_api_key
+        return headers
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
@@ -171,8 +188,12 @@ class FreightosFBXSource(BaseSource):
             url,
             params=params,
             timeout=self.config.request_timeout_seconds,
-            headers={"Accept": "application/json"},
+            headers=self._request_headers(),
         )
+
+        if resp.status_code == 401:
+            self.log.warning("FBX API rejected API key (HTTP 401)")
+            return []
 
         if resp.status_code == 404:
             self.log.debug("No rate data for %s → %s (%s)", origin, destination, container_type)

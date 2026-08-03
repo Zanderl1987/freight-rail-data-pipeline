@@ -16,6 +16,7 @@ class RailCarloading(BaseModel):
     snapshot_date: date = Field(..., description="Date of the reported data")
     railroad: str = Field(..., description="Railroad or carrier name")
     commodity: str = Field(..., description="Commodity group / STCC description")
+    traffic_type: str | None = Field(default=None, description="Originated or Received")
     carloads: int = Field(..., ge=0, description="Number of carloads")
     units: str | None = Field(default="carloads", description="Unit of measurement")
     origin_region: str | None = Field(default=None, description="Origin region / BEA")
@@ -43,6 +44,9 @@ class RailServiceMetric(BaseModel):
     metric_value: float = Field(..., description="Numeric value of the metric")
     unit: str = Field(..., description="Unit: mph, hours, cars")
     region: str | None = Field(default=None, description="Geographic region if applicable")
+    segment: str | None = Field(
+        default=None, description="Commodity/segment (e.g. Automotive, Coal)"
+    )
     raw_record: dict[str, Any] | None = Field(default=None)
     ingested_at: datetime = Field(default_factory=_utcnow)
 

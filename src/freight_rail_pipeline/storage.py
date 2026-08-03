@@ -51,6 +51,7 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("snapshot_date", pa.date32()),
                 pa.field("railroad", pa.utf8()),
                 pa.field("commodity", pa.utf8()),
+                pa.field("traffic_type", pa.utf8(), nullable=True),
                 pa.field("carloads", pa.int64()),
                 pa.field("units", pa.utf8()),
                 pa.field("origin_region", pa.utf8(), nullable=True),
@@ -68,6 +69,7 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("metric_value", pa.float64()),
                 pa.field("unit", pa.utf8()),
                 pa.field("region", pa.utf8(), nullable=True),
+                pa.field("segment", pa.utf8(), nullable=True),
                 pa.field("raw_record", pa.string(), nullable=True),
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]

@@ -8,7 +8,7 @@ from sodapy import Socrata
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential_jitter
 
 from ..config import PipelineConfig
-from ..models import RailCarloading, RailServiceMetric
+from ..models import RailServiceMetric
 from ..models.normalizer import DataNormalizer
 from .base import BaseSource, SourceResult
 
@@ -28,41 +28,42 @@ class USDAgTransportSource(BaseSource):
 
     def validate(self) -> list[str]:
         warnings: list[str] = []
-        try:
-            client = self._get_client()
-            client.get("swcm-ytjc", limit=1)
-            self.log.info("USDA AgTransport connectivity verified")
-        except Exception as exc:
-            warnings.append(f"Cannot reach USDA AgTransport API: {exc}")
-        finally:
-            self._close_client()
+        for name, resource_id in self.config.usda_socrata_resource_ids.items():
+            try:
+                client = self._get_client()
+                client.get(resource_id, limit=1)
+                self.log.info("USDA AgTransport resource %s (%s) verified", name, resource_id)
+            except Exception as exc:
+                warnings.append(f"USDA AgTransport resource {name} ({resource_id}) failed: {exc}")
+            finally:
+                self._close_client()
         return warnings
 
-    def fetch(
-        self, snapshot_date: date | None = None, **kwargs: Any
-    ) -> SourceResult[RailCarloading]:
-        self.log.info("Fetching rail carloadings from USDA AgTransport...")
+    def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[Any]:
+        self.log.info("Fetching rail data from USDA AgTransport...")
         carloadings_result = self._fetch_carloadings(snapshot_date)
+        metrics_result = self._fetch_service_metrics(snapshot_date)
 
-        # TODO: uncomment when service metrics resource ID is confirmed
-        # metrics_result = self._fetch_service_metrics(snapshot_date)
-        # combined = carloadings_result.records + metrics_result.records
-
-        combined = carloadings_result.records
-
-        normalized = []
+        combined: list[Any] = []
         normalizer = DataNormalizer()
-        for raw in combined:
+        for raw in carloadings_result.records:
             record = normalizer.normalize_rail_carloading(raw, snapshot_date=snapshot_date)
             if record is not None:
-                normalized.append(record)
+                combined.append(record)
+        for raw in metrics_result.records:
+            metric_record = normalizer.normalize_rail_service_metric(
+                raw, snapshot_date=snapshot_date
+            )
+            if metric_record is not None:
+                combined.append(metric_record)
 
         return SourceResult(
-            records=normalized,
+            records=combined,
             source_name=self.name,
-            record_count=len(normalized),
+            record_count=len(combined),
             metadata={
-                "raw_count": len(combined),
+                "carloadings_raw": carloadings_result.record_count,
+                "service_metrics_raw": metrics_result.record_count,
                 "snapshot_date": str(snapshot_date or date.today()),
             },
         )
@@ -99,7 +100,7 @@ class USDAgTransportSource(BaseSource):
         try:
             where_clause = ""
             if snapshot_date:
-                where_clause = f"snapshot_date='{snapshot_date.isoformat()}'"
+                where_clause = f"date='{snapshot_date.isoformat()}'"
 
             results: list[dict[str, Any]] = []
             page = 0
@@ -110,7 +111,7 @@ class USDAgTransportSource(BaseSource):
                     where=where_clause if where_clause else None,
                     limit=limit,
                     offset=page * limit,
-                    order="snapshot_date desc",
+                    order="date desc",
                 )
                 if not batch:
                     break
@@ -146,16 +147,28 @@ class USDAgTransportSource(BaseSource):
         try:
             where_clause = ""
             if snapshot_date:
-                where_clause = f"snapshot_date='{snapshot_date.isoformat()}'"
+                where_clause = f"date='{snapshot_date.isoformat()}'"
 
-            results = client.get(
-                resource_id,
-                where=where_clause if where_clause else None,
-                limit=10000,
-                order="snapshot_date desc",
-            )
+            results: list[dict[str, Any]] = []
+            page = 0
+            limit = 1000
+            while True:
+                batch = client.get(
+                    resource_id,
+                    where=where_clause if where_clause else None,
+                    limit=limit,
+                    offset=page * limit,
+                    order="date desc",
+                )
+                if not batch:
+                    break
+                results.extend(batch)
+                page += 1
+                if len(batch) < limit:
+                    break
+
             self.log.info("Fetched %d raw service metric records from USDA", len(results))
-            return SourceResult(records=results or [], source_name=self.name)
+            return SourceResult(records=results, source_name=self.name, record_count=len(results))
         finally:
             self._close_client()
 

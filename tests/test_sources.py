@@ -25,14 +25,49 @@ class TestUSDAgTransportSource:
         mock_client = MagicMock()
         mock_socrata.return_value = mock_client
         mock_client.get.return_value = [
-            {"railroad": "BNSF", "commodity": "Grain", "carloads": "1500"},
-            {"railroad": "UP", "commodity": "Coal", "carloads": "3200"},
+            {
+                "date": "2026-07-25T00:00:00.000",
+                "railroad": "BNSF",
+                "commodity": "Grain",
+                "type": "Originated",
+                "carloads": "1500",
+            },
+            {
+                "date": "2026-07-25T00:00:00.000",
+                "railroad": "UP",
+                "commodity": "Coal",
+                "type": "Received",
+                "carloads": "3200",
+            },
         ]
 
         result = source.fetch(snapshot_date=None)
         assert result.success is True
         assert result.record_count == 2
         assert result.source_name == "usda_agtransport"
+        assert all(isinstance(r.traffic_type, str) for r in result.records)
+
+    @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
+    def test_fetch_service_metrics(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = [
+            {
+                "measure": "Average Train Speed (mph)",
+                "date": "2026-07-24T00:00:00.000",
+                "railroad": "BNSF",
+                "variable": "Automotive",
+                "value": "24.7",
+            }
+        ]
+
+        result = source.fetch_service_metrics(snapshot_date=None)
+        assert result.success is True
+        assert result.record_count == 1
+        metric = result.records[0]
+        assert metric.metric_value == 24.7
+        assert metric.unit == "mph"
+        assert metric.segment == "Automotive"
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
     def test_fetch_handles_empty_response(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
@@ -44,9 +79,16 @@ class TestUSDAgTransportSource:
         assert result.success is True
         assert result.record_count == 0
 
-    def test_validate_connectivity(self, source: USDAgTransportSource) -> None:
+    @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
+    def test_validate_connectivity(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = [{"date": "2026-07-25T00:00:00.000"}]
+
         warnings = source.validate()
         assert isinstance(warnings, list)
+        assert warnings == []
+        assert mock_client.get.call_count == len(source.config.usda_socrata_resource_ids)
 
 
 class TestFreightosFBXSource:
