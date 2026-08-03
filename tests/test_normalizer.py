@@ -37,6 +37,15 @@ class TestRailCarloadingNormalizer:
         assert result is not None
         assert result.snapshot_date == date(2026, 7, 15)
 
+    def test_fractional_carloads(self) -> None:
+        # Real USDA data reports fractional carloads (e.g. prorated across a
+        # mixed-commodity car) -- confirmed live 2026-08-03, was silently
+        # dropping the record when carloads was typed int.
+        raw = {"railroad": "CPKC", "commodity": "Pulp, Paper and Allied Products", "carloads": "811.5"}
+        result = DataNormalizer.normalize_rail_carloading(raw)
+        assert result is not None
+        assert result.carloads == 811.5
+
     def test_missing_carloads_returns_none(self) -> None:
         raw = {"railroad": "CSX", "commodity": "Chemicals"}
         result = DataNormalizer.normalize_rail_carloading(raw)
@@ -112,6 +121,13 @@ class TestOceanFreightRateNormalizer:
         assert result is not None
         assert result.rate_usd == 5800
         assert result.container_type == "40HC"
+
+    def test_fractional_rate(self) -> None:
+        raw = {"routeCode": "FBX01", "originPort": "CNSHA", "destinationPort": "USLAX",
+               "containerType": "40GP", "rateUsd": 4521.75, "tradeLane": "Trans-Pacific Eastbound"}
+        result = DataNormalizer.normalize_ocean_freight_rate(raw)
+        assert result is not None
+        assert result.rate_usd == 4521.75
 
     def test_missing_rate_returns_none(self) -> None:
         raw = {"routeCode": "FBX01", "originPort": "CNSHA"}
