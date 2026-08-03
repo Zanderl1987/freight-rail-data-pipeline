@@ -23,6 +23,12 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   too. PII story verified clean (server-side `$select`, no `raw_record` field, schema-level
   test guard). Decision: census stays in the default run (daily full snapshots accumulate on
   disk; HF dedup keeps the published dataset near current-census-sized).
+  **Merge-base reconciliation**: `origin/main` moved to `3b0c0f6` (FMCSA) after the branch
+  was created, so PR #1 became CONFLICTING — merged `origin/main` into the branch
+  (`1528d3a`, conflicts resolved in the PR's favor), which left a duplicate
+  `TestFMCSACarrierCensusSource` class (the later one shadowed the first, silently dropping
+  the pagination test from collection). Removed the duplicate (`43fa634`); 91 tests pass,
+  PR #1 MERGEABLE with green CI (test 3.11 + 3.12 + GitGuardian).
 - GitHub email verification resolved 2026-08-03 — pushes unblocked.
 
 ## Session log
