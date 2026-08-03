@@ -16,6 +16,7 @@ from .models.schemas import (
     RailCarloadingBatch,
     RailSafetyIncidentBatch,
     RailServiceMetricBatch,
+    RailTariffRateBatch,
 )
 from .storage import StorageWriter
 
@@ -167,6 +168,13 @@ class FreightPipeline:
         if fi_records:
             written += self.storage.write_freight_indicators(
                 FreightIndicatorBatch(records=fi_records),
+                dt=snapshot_date,
+            )
+
+        tr_records = [r for r in records if type(r).__name__ == "RailTariffRate"]
+        if tr_records:
+            written += self.storage.write_rail_tariff_rates(
+                RailTariffRateBatch(records=tr_records),
                 dt=snapshot_date,
             )
 

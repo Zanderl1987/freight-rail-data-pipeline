@@ -18,6 +18,7 @@ from .models.schemas import (
     RailCarloadingBatch,
     RailSafetyIncidentBatch,
     RailServiceMetricBatch,
+    RailTariffRateBatch,
 )
 
 log = logging.getLogger(__name__)
@@ -109,6 +110,22 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "rail_tariff_rates": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("railroad", pa.utf8()),
+                pa.field("commodity", pa.utf8()),
+                pa.field("origin", pa.utf8()),
+                pa.field("destination", pa.utf8()),
+                pa.field("rate_per_car", pa.decimal128(12, 2), nullable=True),
+                pa.field("fuel_surcharge", pa.decimal128(10, 2), nullable=True),
+                pa.field("currency", pa.utf8()),
+                pa.field("movement_type", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
         "rail_safety_incidents": pa.schema(
             [
                 pa.field("source", pa.utf8()),
@@ -187,6 +204,15 @@ class StorageWriter:
         if not batch.records:
             return 0
         return self._write_table("freight_indicators", batch.records, dt)
+
+    def write_rail_tariff_rates(
+        self,
+        batch: RailTariffRateBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("rail_tariff_rates", batch.records, dt)
 
     def write_rail_safety_incidents(
         self,

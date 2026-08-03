@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .schemas import (
@@ -10,6 +11,7 @@ from .schemas import (
     RailCarloading,
     RailSafetyIncident,
     RailServiceMetric,
+    RailTariffRate,
 )
 
 log = logging.getLogger(__name__)
@@ -64,6 +66,38 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize rail carloading record: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def normalize_grain_rail_carload(
+        raw: dict[str, Any],
+        snapshot_date: date | None = None,
+    ) -> RailCarloading | None:
+        """USDA AgTransport's grain-specific weekly car counts (resource 27k8-utc2)
+        report one row per railroad/state/week with `all`/`dedicated_or_shuttle`/`other`
+        car counts rather than the generic carloadings feed's `carloads` field."""
+        try:
+            railroad = raw.get("railroad")
+            total_cars = raw.get("all")
+            if not railroad or total_cars is None:
+                return None
+
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            reported = record_date or snapshot_date or date.today()
+
+            return RailCarloading(
+                snapshot_date=reported,
+                railroad=str(railroad),
+                commodity="Grain",
+                traffic_type=None,
+                carloads=float(total_cars),
+                units="cars",
+                origin_region=raw.get("state"),
+                destination_region=None,
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize grain rail carload record: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod
@@ -150,6 +184,15 @@ class DataNormalizer:
             return None
 
     @staticmethod
+    def _safe_decimal(value: Any) -> Decimal | None:
+        if value in (None, ""):
+            return None
+        try:
+            return Decimal(str(value)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    @staticmethod
     def _parse_fra_date(raw: dict[str, Any]) -> date | None:
         """FRA's `date` field is null on many older records (mostly pre-1990s) even
         though year/month/day are populated -- fall back to reconstructing it. Form 54
@@ -210,6 +253,48 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize rail safety incident: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def normalize_rail_tariff_rate(
+        raw: dict[str, Any],
+        snapshot_date: date | None = None,
+    ) -> RailTariffRate | None:
+        """USDA AgTransport's Historical U.S. Rail Tariff Rates for Grain and Soybeans
+        (resource idbx-qf4w): monthly published tariffs by railroad/origin/destination."""
+        try:
+            railroad = raw.get("railroad")
+            commodity = raw.get("commodity")
+            origin_city = raw.get("origin_city")
+            origin_state = raw.get("origin_state")
+            destination_city = raw.get("destination_city")
+            destination_state = raw.get("destination_state")
+            if not railroad or not commodity or not origin_city or not destination_city:
+                return None
+
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            reported = record_date or snapshot_date or date.today()
+
+            origin = f"{origin_city}, {origin_state}" if origin_state else str(origin_city)
+            destination = (
+                f"{destination_city}, {destination_state}"
+                if destination_state
+                else str(destination_city)
+            )
+
+            return RailTariffRate(
+                snapshot_date=reported,
+                railroad=str(railroad),
+                commodity=str(commodity),
+                origin=origin,
+                destination=destination,
+                rate_per_car=DataNormalizer._safe_decimal(raw.get("tariff_car")),
+                fuel_surcharge=DataNormalizer._safe_decimal(raw.get("fsc_car")),
+                movement_type=raw.get("train_type"),
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize rail tariff rate record: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod

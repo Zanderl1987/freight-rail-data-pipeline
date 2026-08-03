@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,6 +81,66 @@ class TestUSDAgTransportSource:
         result = source.fetch()
         assert result.success is True
         assert result.record_count == 0
+
+    @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
+    def test_fetch_grain_rail_carloads_and_tariffs_via_full_fetch(
+        self, mock_socrata: MagicMock, source: USDAgTransportSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+
+        fixtures = {
+            source.config.usda_socrata_resource_ids["rail_carloadings"]: [],
+            source.config.usda_socrata_resource_ids["rail_service_metrics"]: [],
+            source.config.usda_socrata_resource_ids["grain_rail_carloads"]: [
+                {
+                    "date": "2026-07-24T00:00:00.000",
+                    "railroad": "BNSF",
+                    "state": "AZ",
+                    "all": "2",
+                    "dedicated_or_shuttle": "0",
+                    "other": "2",
+                }
+            ],
+            source.config.usda_socrata_resource_ids["grain_rail_tariff_rates"]: [
+                {
+                    "date": "2025-04-15T00:00:00.000",
+                    "commodity": "Soybeans",
+                    "origin_city": "Grand Island",
+                    "origin_state": "NE",
+                    "destination_city": "Portland",
+                    "destination_state": "OR",
+                    "train_type": "shuttle",
+                    "railroad": "UP",
+                    "tariff_car": "6185",
+                    "fsc_car": "523.84",
+                }
+            ],
+        }
+
+        def get_side_effect(resource_id: str, **kwargs: object) -> list[dict[str, object]]:
+            if kwargs.get("offset", 0):
+                return []
+            return fixtures.get(resource_id, [])
+
+        mock_client.get.side_effect = get_side_effect
+
+        result = source.fetch(snapshot_date=None)
+        assert result.success is True
+        assert result.record_count == 2
+        assert result.metadata["grain_rail_carloads_raw"] == 1
+        assert result.metadata["grain_rail_tariff_rates_raw"] == 1
+
+        carload = next(r for r in result.records if type(r).__name__ == "RailCarloading")
+        assert carload.commodity == "Grain"
+        assert carload.carloads == 2.0
+        assert carload.origin_region == "AZ"
+
+        tariff = next(r for r in result.records if type(r).__name__ == "RailTariffRate")
+        assert tariff.origin == "Grand Island, NE"
+        assert tariff.destination == "Portland, OR"
+        assert tariff.rate_per_car == Decimal("6185.00")
+        assert tariff.fuel_surcharge == Decimal("523.84")
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
     def test_validate_connectivity(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:

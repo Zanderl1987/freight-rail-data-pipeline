@@ -31,6 +31,8 @@ class PipelineConfig:
         default_factory=lambda: {
             "rail_carloadings": "tb7q-kn5i",
             "rail_service_metrics": "axkm-yjzy",
+            "grain_rail_carloads": "27k8-utc2",
+            "grain_rail_tariff_rates": "idbx-qf4w",
         }
     )
 

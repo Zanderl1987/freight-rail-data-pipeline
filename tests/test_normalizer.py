@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from freight_rail_pipeline.models.normalizer import DataNormalizer
 
@@ -54,6 +55,99 @@ class TestRailCarloadingNormalizer:
     def test_empty_record(self) -> None:
         result = DataNormalizer.normalize_rail_carloading({})
         assert result is None
+
+
+class TestGrainRailCarloadNormalizer:
+    def test_valid_record(self) -> None:
+        raw = {
+            "date": "2026-07-24T00:00:00.000",
+            "railroad": "BNSF",
+            "state": "AZ",
+            "all": "2",
+            "dedicated_or_shuttle": "0",
+            "other": "2",
+        }
+        result = DataNormalizer.normalize_grain_rail_carload(raw)
+        assert result is not None
+        assert result.railroad == "BNSF"
+        assert result.commodity == "Grain"
+        assert result.carloads == 2.0
+        assert result.units == "cars"
+        assert result.origin_region == "AZ"
+        assert result.snapshot_date == date(2026, 7, 24)
+
+    def test_missing_railroad_returns_none(self) -> None:
+        raw = {"date": "2026-07-24T00:00:00.000", "state": "AZ", "all": "2"}
+        assert DataNormalizer.normalize_grain_rail_carload(raw) is None
+
+    def test_missing_all_returns_none(self) -> None:
+        raw = {"date": "2026-07-24T00:00:00.000", "railroad": "BNSF", "state": "AZ"}
+        assert DataNormalizer.normalize_grain_rail_carload(raw) is None
+
+    def test_zero_cars_is_valid(self) -> None:
+        # `all` of "0" is a legitimate zero-cars week, not a missing value.
+        raw = {"date": "2026-07-24T00:00:00.000", "railroad": "BNSF", "state": "AZ", "all": "0"}
+        result = DataNormalizer.normalize_grain_rail_carload(raw)
+        assert result is not None
+        assert result.carloads == 0.0
+
+
+class TestRailTariffRateNormalizer:
+    def test_valid_record(self) -> None:
+        raw = {
+            "date": "2025-04-15T00:00:00.000",
+            "commodity": "Soybeans",
+            "origin_city": "Grand Island",
+            "origin_state": "NE",
+            "destination_city": "Portland",
+            "destination_state": "OR",
+            "train_type": "shuttle",
+            "railroad": "UP",
+            "tariff_car": "6185",
+            "fsc_car": "523.84",
+        }
+        result = DataNormalizer.normalize_rail_tariff_rate(raw)
+        assert result is not None
+        assert result.railroad == "UP"
+        assert result.commodity == "Soybeans"
+        assert result.origin == "Grand Island, NE"
+        assert result.destination == "Portland, OR"
+        assert result.rate_per_car == Decimal("6185.00")
+        assert result.fuel_surcharge == Decimal("523.84")
+        assert result.movement_type == "shuttle"
+        assert result.snapshot_date == date(2025, 4, 15)
+
+    def test_missing_state_falls_back_to_city_only(self) -> None:
+        raw = {
+            "date": "2025-04-15T00:00:00.000",
+            "commodity": "Wheat",
+            "origin_city": "Chicago",
+            "destination_city": "Albany",
+            "railroad": "CSX",
+            "tariff_car": "7413",
+        }
+        result = DataNormalizer.normalize_rail_tariff_rate(raw)
+        assert result is not None
+        assert result.origin == "Chicago"
+        assert result.destination == "Albany"
+
+    def test_missing_commodity_returns_none(self) -> None:
+        raw = {
+            "date": "2025-04-15T00:00:00.000",
+            "origin_city": "Chicago",
+            "destination_city": "Albany",
+            "railroad": "CSX",
+        }
+        assert DataNormalizer.normalize_rail_tariff_rate(raw) is None
+
+    def test_missing_railroad_returns_none(self) -> None:
+        raw = {
+            "date": "2025-04-15T00:00:00.000",
+            "commodity": "Wheat",
+            "origin_city": "Chicago",
+            "destination_city": "Albany",
+        }
+        assert DataNormalizer.normalize_rail_tariff_rate(raw) is None
 
 
 class TestRailServiceMetricNormalizer:
