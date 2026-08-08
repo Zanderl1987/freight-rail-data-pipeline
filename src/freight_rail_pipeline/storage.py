@@ -52,6 +52,7 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("railroad", pa.utf8()),
                 pa.field("commodity", pa.utf8()),
                 pa.field("carloads", pa.int64()),
+                pa.field("carload_type", pa.utf8(), nullable=True),
                 pa.field("units", pa.utf8()),
                 pa.field("origin_region", pa.utf8(), nullable=True),
                 pa.field("destination_region", pa.utf8(), nullable=True),

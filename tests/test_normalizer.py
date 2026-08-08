@@ -32,6 +32,17 @@ class TestRailCarloadingNormalizer:
         assert result.commodity == "Coal"
         assert result.carloads == 5000
 
+    def test_preserves_carload_type(self) -> None:
+        raw = {
+            "railroad": "BNSF",
+            "commodity": "Grain",
+            "type": "Received",
+            "carloads": 900,
+        }
+        result = DataNormalizer.normalize_rail_carloading(raw, snapshot_date=date(2026, 7, 15))
+        assert result is not None
+        assert result.carload_type == "Received"
+
     def test_missing_carloads_returns_none(self) -> None:
         raw = {"railroad": "CSX", "commodity": "Chemicals"}
         result = DataNormalizer.normalize_rail_carloading(raw)

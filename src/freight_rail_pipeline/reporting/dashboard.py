@@ -168,7 +168,7 @@ def show_rail_carloadings() -> None:
         return
 
     with st.expander("Filters", expanded=True):
-        cols = st.columns(3)
+        cols = st.columns(4)
         with cols[0]:
             if "railroad" in df.columns:
                 railroads = sorted(df["railroad"].dropna().unique())
@@ -178,6 +178,14 @@ def show_rail_carloadings() -> None:
                     default=railroads[:3] if len(railroads) > 3 else railroads,
                 )
         with cols[1]:
+            if "carload_type" in df.columns:
+                types = sorted(df["carload_type"].dropna().unique())
+                selected_types = st.multiselect(
+                    "Type",
+                    types,
+                    default=[t for t in ("Originated",) if t in types],
+                )
+        with cols[2]:
             if "commodity" in df.columns:
                 commodities = sorted(df["commodity"].dropna().unique())
                 selected_comm = st.multiselect(
@@ -185,7 +193,7 @@ def show_rail_carloadings() -> None:
                     commodities,
                     default=commodities[:5] if len(commodities) > 5 else commodities,
                 )
-        with cols[2]:
+        with cols[3]:
             if "snapshot_date" in df.columns:
                 min_date = df["snapshot_date"].min()
                 max_date = df["snapshot_date"].max()
@@ -194,6 +202,8 @@ def show_rail_carloadings() -> None:
     filtered = df.copy()
     if "railroad" in df.columns and selected_rr:
         filtered = filtered[filtered["railroad"].isin(selected_rr)]
+    if "carload_type" in df.columns and selected_types:
+        filtered = filtered[filtered["carload_type"].isin(selected_types)]
     if "commodity" in df.columns and selected_comm:
         filtered = filtered[filtered["commodity"].isin(selected_comm)]
     if "snapshot_date" in filtered.columns and len(date_range) == 2:

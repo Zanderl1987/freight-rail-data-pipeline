@@ -29,8 +29,8 @@ class PipelineConfig:
 
     usda_socrata_resource_ids: dict[str, str] = field(
         default_factory=lambda: {
-            "rail_carloadings": "swcm-ytjc",
-            "rail_service_metrics": "jvfn-6e7j",
+            "rail_carloadings": "tb7q-kn5i",
+            "rail_service_metrics": "axkm-yjzy",
         }
     )
 

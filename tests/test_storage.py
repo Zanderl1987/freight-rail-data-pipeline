@@ -40,7 +40,13 @@ class TestStorageWriter:
 
         batch = RailCarloadingBatch(records=[
             RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500),
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="UP", commodity="Coal", carloads=3200),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15),
+                railroad="UP",
+                commodity="Coal",
+                carloads=3200,
+                carload_type="Originated",
+            ),
         ])
 
         count = writer.write_carloadings(batch, dt=date(2026, 7, 15))
@@ -52,6 +58,8 @@ class TestStorageWriter:
         df = pd.read_parquet(parquet_files[0])
         assert len(df) == 2
         assert list(df["railroad"]) == ["BNSF", "UP"]
+        assert "carload_type" in df.columns
+        assert df.loc[df["railroad"] == "UP", "carload_type"].iloc[0] == "Originated"
 
     def test_write_ocean_rates_creates_parquet_and_csv(self) -> None:
         config = PipelineConfig(output_dir=str(self._test_dir))

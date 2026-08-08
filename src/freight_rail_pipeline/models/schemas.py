@@ -17,6 +17,9 @@ class RailCarloading(BaseModel):
     railroad: str = Field(..., description="Railroad or carrier name")
     commodity: str = Field(..., description="Commodity group / STCC description")
     carloads: int = Field(..., ge=0, description="Number of carloads")
+    carload_type: str | None = Field(
+        default=None, description="Direction of traffic: Originated or Received"
+    )
     units: str | None = Field(default="carloads", description="Unit of measurement")
     origin_region: str | None = Field(default=None, description="Origin region / BEA")
     destination_region: str | None = Field(default=None, description="Destination region / BEA")

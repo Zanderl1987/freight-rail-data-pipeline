@@ -5,7 +5,13 @@ from datetime import date
 from typing import Any, cast
 
 import requests
-from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from ..config import PipelineConfig
 from ..models import OceanFreightRate
@@ -98,6 +104,14 @@ class FreightosFBXSource(BaseSource):
 
     def validate(self) -> list[str]:
         warnings: list[str] = []
+        if not self.get_credential("FREIGHTOS_API_KEY") or not self.get_credential(
+            "FREIGHTOS_SECRET_KEY"
+        ):
+            warnings.append(
+                "FREIGHTOS_API_KEY and FREIGHTOS_SECRET_KEY not configured; "
+                "Freightos Terminal API requires credentials (developers.freightos.com)"
+            )
+            return warnings
         try:
             resp = requests.get(f"{self.base_url}/", timeout=self.config.request_timeout_seconds)
             if resp.status_code == 200 or resp.status_code == 404:
@@ -111,8 +125,21 @@ class FreightosFBXSource(BaseSource):
     def fetch(
         self, snapshot_date: date | None = None, **kwargs: Any
     ) -> SourceResult[OceanFreightRate]:
+        if not self.get_credential("FREIGHTOS_API_KEY") or not self.get_credential(
+            "FREIGHTOS_SECRET_KEY"
+        ):
+            self.log.warning(
+                "FREIGHTOS_API_KEY and FREIGHTOS_SECRET_KEY not configured; "
+                "skipping Freightos fetch"
+            )
+            return SourceResult(
+                records=[],
+                source_name=self.name,
+                metadata={"routes_queried": 0, "skipped": "missing_credentials"},
+            )
+
         self.log.info("Fetching ocean freight rates from Freightos FBX...")
-        raw_results = self._fetch_all_routes()
+        raw_results = self._fetch_all_routes(snapshot_date)
         normalizer = DataNormalizer()
         normalized = []
         for raw in raw_results:
@@ -131,12 +158,14 @@ class FreightosFBXSource(BaseSource):
             },
         )
 
-    def _fetch_all_routes(self) -> list[dict[str, Any]]:
+    def _fetch_all_routes(self, snapshot_date: date | None = None) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for route in FBX_ROUTES:
-            for container_type in ["40GP"]:
+            for container_type in ["40'"]:
                 try:
-                    rates = self._fetch_route(route["origin"], route["destination"], container_type)
+                    rates = self._fetch_route(
+                        route["origin"], route["destination"], container_type, snapshot_date
+                    )
                     for rate in rates:
                         rate["routeCode"] = route["route_code"]
                         rate["route_description"] = route["description"]
@@ -152,27 +181,52 @@ class FreightosFBXSource(BaseSource):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, IOError)),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
     )
     def _fetch_route(
-        self, origin: str, destination: str, container_type: str
+        self,
+        origin: str,
+        destination: str,
+        container_type: str,
+        snapshot_date: date | None = None,
     ) -> list[dict[str, Any]]:
         url = f"{self.base_url}/"
+        api_key = self.get_credential("FREIGHTOS_API_KEY")
+        secret_key = self.get_credential("FREIGHTOS_SECRET_KEY")
+
+        to_date = snapshot_date or date.today()
+        from_date = to_date
+
         params: dict[str, str] = {
             "origin": origin,
             "destination": destination,
-            "mode": "ocean",
+            "mode": "FCL",
             "load": container_type,
-            "route_type": "P2P",
+            "tradelanes_type": "ship",
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
         }
+        headers: dict[str, str] = {"Accept": "application/json"}
+        if api_key:
+            headers["apikey"] = api_key
+        if secret_key:
+            headers["secret-key"] = secret_key
+
         self.log.debug("GET %s params=%s", url, params)
         resp = requests.get(
             url,
             params=params,
             timeout=self.config.request_timeout_seconds,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
+
+        if resp.status_code == 401:
+            raise PermissionError(
+                "Freightos API returned 401 — configure FREIGHTOS_API_KEY and "
+                "FREIGHTOS_SECRET_KEY (developers.freightos.com)"
+            )
 
         if resp.status_code == 404:
             self.log.debug("No rate data for %s → %s (%s)", origin, destination, container_type)
@@ -189,7 +243,7 @@ class FreightosFBXSource(BaseSource):
         if isinstance(data, list):
             records = data
         elif isinstance(data, dict):
-            records = cast(list[Any], data.get("data", data.get("results", [data])))
+            records = cast(list[Any], data.get("data", data.get("results", [])))
 
         for rec in records:
             rec["originPort"] = origin

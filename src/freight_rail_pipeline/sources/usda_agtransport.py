@@ -5,7 +5,13 @@ from datetime import date
 from typing import Any
 
 from sodapy import Socrata
-from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from ..config import PipelineConfig
 from ..models import RailCarloading, RailServiceMetric
@@ -30,7 +36,7 @@ class USDAgTransportSource(BaseSource):
         warnings: list[str] = []
         try:
             client = self._get_client()
-            client.get("swcm-ytjc", limit=1)
+            client.get(self.config.usda_socrata_resource_ids["rail_carloadings"], limit=1)
             self.log.info("USDA AgTransport connectivity verified")
         except Exception as exc:
             warnings.append(f"Cannot reach USDA AgTransport API: {exc}")
@@ -40,20 +46,20 @@ class USDAgTransportSource(BaseSource):
 
     def fetch(
         self, snapshot_date: date | None = None, **kwargs: Any
-    ) -> SourceResult[RailCarloading]:
+    ) -> SourceResult[RailCarloading | RailServiceMetric]:
         self.log.info("Fetching rail carloadings from USDA AgTransport...")
         carloadings_result = self._fetch_carloadings(snapshot_date)
+        metrics_result = self._fetch_service_metrics(snapshot_date)
+        combined = carloadings_result.records + metrics_result.records
 
-        # TODO: uncomment when service metrics resource ID is confirmed
-        # metrics_result = self._fetch_service_metrics(snapshot_date)
-        # combined = carloadings_result.records + metrics_result.records
-
-        combined = carloadings_result.records
-
-        normalized = []
+        normalized: list[RailCarloading | RailServiceMetric] = []
         normalizer = DataNormalizer()
         for raw in combined:
-            record = normalizer.normalize_rail_carloading(raw, snapshot_date=snapshot_date)
+            record: RailCarloading | RailServiceMetric | None = (
+                normalizer.normalize_rail_carloading(raw, snapshot_date=snapshot_date)
+            )
+            if record is None:
+                record = normalizer.normalize_rail_service_metric(raw, snapshot_date=snapshot_date)
             if record is not None:
                 normalized.append(record)
 
@@ -63,6 +69,8 @@ class USDAgTransportSource(BaseSource):
             record_count=len(normalized),
             metadata={
                 "raw_count": len(combined),
+                "carloadings_raw": carloadings_result.record_count,
+                "service_metrics_raw": metrics_result.record_count,
                 "snapshot_date": str(snapshot_date or date.today()),
             },
         )
@@ -90,6 +98,7 @@ class USDAgTransportSource(BaseSource):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, IOError)),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
     )
@@ -99,7 +108,7 @@ class USDAgTransportSource(BaseSource):
         try:
             where_clause = ""
             if snapshot_date:
-                where_clause = f"snapshot_date='{snapshot_date.isoformat()}'"
+                where_clause = f"date='{snapshot_date.isoformat()}'"
 
             results: list[dict[str, Any]] = []
             page = 0
@@ -110,7 +119,7 @@ class USDAgTransportSource(BaseSource):
                     where=where_clause if where_clause else None,
                     limit=limit,
                     offset=page * limit,
-                    order="snapshot_date desc",
+                    order="date desc",
                 )
                 if not batch:
                     break
@@ -131,6 +140,7 @@ class USDAgTransportSource(BaseSource):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, IOError)),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
     )
@@ -146,13 +156,13 @@ class USDAgTransportSource(BaseSource):
         try:
             where_clause = ""
             if snapshot_date:
-                where_clause = f"snapshot_date='{snapshot_date.isoformat()}'"
+                where_clause = f"date='{snapshot_date.isoformat()}'"
 
             results = client.get(
                 resource_id,
                 where=where_clause if where_clause else None,
                 limit=10000,
-                order="snapshot_date desc",
+                order="date desc",
             )
             self.log.info("Fetched %d raw service metric records from USDA", len(results))
             return SourceResult(records=results or [], source_name=self.name)

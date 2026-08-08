@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -29,6 +30,7 @@ class DataNormalizer:
                 railroad=str(raw.get("railroad", raw.get("carrier", "unknown"))),
                 commodity=str(raw.get("commodity", raw.get("commodity_desc", "unknown"))),
                 carloads=int(carloads_raw),
+                carload_type=raw.get("type"),
                 units=raw.get("units", "carloads"),
                 origin_region=raw.get("origin", raw.get("origin_region")),
                 destination_region=raw.get("destination", raw.get("destination_region")),
@@ -44,19 +46,30 @@ class DataNormalizer:
         snapshot_date: date | None = None,
     ) -> RailServiceMetric | None:
         try:
-            metric_name = raw.get("metric_name") or raw.get("metric") or raw.get("indicator")
+            metric_name = (
+                raw.get("metric_name")
+                or raw.get("metric")
+                or raw.get("indicator")
+                or raw.get("measure")
+            )
             metric_value = raw.get("metric_value") or raw.get("value")
             railroad = raw.get("railroad") or raw.get("carrier") or raw.get("reporting_railroad")
 
             if not metric_name or metric_value is None or not railroad:
                 return None
 
+            unit = str(raw.get("unit", "unknown"))
+            if unit == "unknown" and isinstance(metric_name, str):
+                match = re.search(r"\(([^)]+)\)\s*$", metric_name)
+                if match:
+                    unit = match.group(1).strip().lower()
+
             return RailServiceMetric(
                 snapshot_date=snapshot_date or date.today(),
                 railroad=str(railroad),
                 metric_name=str(metric_name).lower().replace(" ", "_"),
                 metric_value=float(metric_value),
-                unit=str(raw.get("unit", "unknown")),
+                unit=unit,
                 region=raw.get("region"),
                 raw_record=raw,
             )
@@ -67,11 +80,17 @@ class DataNormalizer:
     @staticmethod
     def normalize_ocean_freight_rate(raw: dict[str, Any]) -> OceanFreightRate | None:
         try:
-            rate_usd = raw.get("rateUsd") or raw.get("rate_usd") or raw.get("rate")
+            rate_usd = (
+                raw.get("rateUsd")
+                or raw.get("rate_usd")
+                or raw.get("rate")
+                or raw.get("median_price")
+                or raw.get("average_price")
+            )
             if rate_usd is None:
                 return None
 
-            published = raw.get("publishedDate") or raw.get("published_date")
+            published = raw.get("publishedDate") or raw.get("published_date") or raw.get("date")
             parsed_date = date.today()
             if published:
                 if isinstance(published, str):
