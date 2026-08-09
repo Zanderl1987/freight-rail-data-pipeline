@@ -10,18 +10,26 @@ datalake ingestion (Iceberg-compatible schema design).
 |--------|------|--------|-----------|
 | **USDA AgTransport** | Rail carloadings by commodity, rail service metrics (speed/dwell/cars-on-line), rail tariff rates | Public Socrata API (free, no key required) | Weekly |
 | **Freightos Baltic Index (FBX)** | Ocean container spot rates on 12 major trade lanes | Public API (free tier) | Daily/weekly |
+| **BTS Freight Indicators** | Truck spot rates (DAT), rail carloads/intermodal, train speed/dwell, ocean container rates | Public Socrata API (free, no key) | Weekly/monthly |
+| **FRA Safety Data** | Rail accidents/incidents (Form 54/57) | Public Socrata API (free, no key) | Monthly |
+| **FMCSA Carrier Census** | Motor carrier registrations (universe table) | Public API (free, no key) | ~Annual |
+| **Eurostat rail freight** | EU rail goods transported (tonnes + tonne-km, 37 countries) | Public JSON-stat API (free, no key) | Annual (2004+) |
+| **FRED (Cass + Truck Tonnage)** | Cass Freight Index (shipments/expenditures), ATA Truck Tonnage Index | Free API (requires `FRED_API_KEY`) | Monthly |
 | **STB Waybill** (planned) | Origin-destination commodity flows by rail | Public Use File (annual CSV) | Annual |
 | **BTS Freight Analysis Framework** (planned) | Multimodal freight tonnage/value forecasts | CSV downloads | Periodic |
+| **Census Intl Trade / UN Comtrade / EIA / BLS** (planned) | Trade by port/mode, energy, PPI | Free APIs (key signups TODO) | Monthly |
 
 ## Architecture
 
 ```
 USDA Socrata API ─┐
-                   ├──► Normalizer ──► Storage ──► Parquet/CSV
-Freightos FBX ────┘       │
-                           └──► Reporting
-                                ├── CLI (click + rich)
-                                └── Streamlit dashboard
+BTS Freight Inds ─┤
+FRA Safety ───────┤
+FMCSA Census ─────┼──► Normalizer ──► Storage ──► Parquet/CSV
+Eurostat ─────────┤       │
+FRED ─────────────┤       └──► Reporting
+Freightos FBX ────┘            ├── CLI (click + rich)
+                               └── Streamlit dashboard
 ```
 
 ## Quick Start
@@ -35,7 +43,7 @@ source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
 
 # Run the pipeline
-freight-pipe run --sources usda,fbx
+freight-pipe run --sources usda,fbx,bts,fra,fmcsa,eurostat,fred
 
 # Launch the dashboard
 freight-pipe dashboard
@@ -55,7 +63,12 @@ src/freight_rail_pipeline/
 ├── sources/
 │   ├── base.py          # Abstract source interface
 │   ├── usda_agtransport.py
-│   └── freightos_fbx.py
+│   ├── freightos_fbx.py
+│   ├── bts_freight_indicators.py
+│   ├── fra_safety.py
+│   ├── fmcsa_carrier_census.py
+│   ├── eurostat_rail.py
+│   └── fred.py
 ├── models/
 │   ├── schemas.py       # Pydantic data models
 │   └── normalizer.py    # Raw-to-canonical transformation

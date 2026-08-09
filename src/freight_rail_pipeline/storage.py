@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .config import PipelineConfig
 from .models.schemas import (
+    EurostatRailFreightBatch,
     FreightIndicatorBatch,
     MotorCarrierCensusBatch,
     OceanFreightRateBatch,
@@ -162,6 +163,20 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "rail_eurostat_freight": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("period", pa.utf8()),
+                pa.field("country_code", pa.utf8()),
+                pa.field("country_name", pa.utf8(), nullable=True),
+                pa.field("unit", pa.utf8()),
+                pa.field("metric", pa.utf8()),
+                pa.field("value", pa.float64()),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     return schemas.get(table_name, pa.schema([]))
 
@@ -247,6 +262,15 @@ class StorageWriter:
             return 0
         return self._write_table("rail_safety_incidents", batch.records, dt)
 
+    def write_rail_eurostat_freight(
+        self,
+        batch: EurostatRailFreightBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("rail_eurostat_freight", batch.records, dt)
+
     def _write_table(
         self,
         table_name: str,
@@ -256,47 +280,59 @@ class StorageWriter:
         if not records:
             return 0
 
-        snapshot = dt or getattr(records[0], "snapshot_date", date.today())
-        if not isinstance(snapshot, date):
-            snapshot = date.today()
         schema = _schema_for_model(table_name)
-        partition_dir = _partition_path(self.output_dir, "freight", table_name, snapshot)
-        partition_dir.mkdir(parents=True, exist_ok=True)
 
-        # Serialize raw_record to JSON string for parquet compatibility
-        serialized = []
-        for r in records:
-            d = r.model_dump(mode="python")
-            if d.get("raw_record") is not None:
-                import json
+        def partition_date(record: BaseModel) -> date:
+            snapshot = getattr(record, "snapshot_date", None)
+            if not isinstance(snapshot, date):
+                snapshot = dt or date.today()
+            return snapshot if isinstance(snapshot, date) else dt or date.today()
 
-                d["raw_record"] = json.dumps(d["raw_record"], default=str)
-            d["ingested_at"] = d.get("ingested_at", pd.Timestamp.now("UTC"))
-            serialized.append(d)
+        written = 0
+        by_date: dict[date, list[BaseModel]] = {}
+        for record in records:
+            by_date.setdefault(partition_date(record), []).append(record)
 
-        df = pd.DataFrame(serialized)
+        for snapshot, day_records in sorted(by_date.items()):
+            partition_dir = _partition_path(self.output_dir, "freight", table_name, snapshot)
+            partition_dir.mkdir(parents=True, exist_ok=True)
 
-        # Ensure date-ish fields
-        if "snapshot_date" in df.columns:
-            df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
-        if "incident_date" in df.columns:
-            df["incident_date"] = pd.to_datetime(df["incident_date"]).dt.date
-        if "ingested_at" in df.columns:
-            df["ingested_at"] = pd.to_datetime(df["ingested_at"])
+            # Serialize raw_record to JSON string for parquet compatibility
+            serialized = []
+            for r in day_records:
+                d = r.model_dump(mode="python")
+                if d.get("raw_record") is not None:
+                    import json
 
-        # Write Parquet
-        pa_table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
-        file_path = partition_dir / f"{table_name}.parquet"
-        pq.write_table(pa_table, file_path, compression="zstd")  # type: ignore[no-untyped-call]
-        log.info("Wrote %d records to %s", len(records), file_path)
-        self.written_paths.append(str(file_path))
+                    d["raw_record"] = json.dumps(d["raw_record"], default=str)
+                d["ingested_at"] = d.get("ingested_at", pd.Timestamp.now("UTC"))
+                serialized.append(d)
 
-        # Write CSV as fallback
-        csv_path = partition_dir / f"{table_name}.csv"
-        df.to_csv(csv_path, index=False)
-        log.info("Wrote %d records to %s", len(records), csv_path)
+            df = pd.DataFrame(serialized)
 
-        return len(records)
+            # Ensure date-ish fields
+            if "snapshot_date" in df.columns:
+                df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
+            if "incident_date" in df.columns:
+                df["incident_date"] = pd.to_datetime(df["incident_date"]).dt.date
+            if "ingested_at" in df.columns:
+                df["ingested_at"] = pd.to_datetime(df["ingested_at"])
+
+            # Write Parquet
+            pa_table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+            file_path = partition_dir / f"{table_name}.parquet"
+            pq.write_table(pa_table, file_path, compression="zstd")  # type: ignore[no-untyped-call]
+            log.info("Wrote %d records to %s", len(day_records), file_path)
+            self.written_paths.append(str(file_path))
+
+            # Write CSV as fallback
+            csv_path = partition_dir / f"{table_name}.csv"
+            df.to_csv(csv_path, index=False)
+            log.info("Wrote %d records to %s", len(day_records), csv_path)
+
+            written += len(day_records)
+
+        return written
 
     def write_summary(self, summary: PipelineRunSummary) -> None:
         summary_file = self.output_dir / "pipeline_runs" / f"{summary.run_id}.json"

@@ -59,9 +59,7 @@ class USDAgTransportSource(BaseSource):
             if metric_record is not None:
                 combined.append(metric_record)
         for raw in grain_carloads_result.records:
-            grain_record = normalizer.normalize_grain_rail_carload(
-                raw, snapshot_date=snapshot_date
-            )
+            grain_record = normalizer.normalize_grain_rail_carload(raw, snapshot_date=snapshot_date)
             if grain_record is not None:
                 combined.append(grain_record)
         for raw in grain_tariffs_result.records:

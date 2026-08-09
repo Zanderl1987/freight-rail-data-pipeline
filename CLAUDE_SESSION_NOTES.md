@@ -34,13 +34,44 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
 - **2026-08-03**: Ran `freight-pipe run --sources usda` (USDA needs no key, so this is
   unblocked even though the Freightos half of R2 isn't) as this pipeline's first-ever
   live data collection. [Outcome to be confirmed/appended once the run completes.]
+- **2026-08-09**: Session: expand free data-source coverage. Extensive search + live
+  endpoint probes (see `US_DOMESTIC_FREIGHT_SOURCES.md`, updated same day) over Eurostat,
+  FRED (incl. keyless CSV endpoint), FMC, Census International Trade (now key-gated —
+  "Missing Key" HTML), UN Comtrade, EIA/BLS quotas, BTS TransBorder Socrata (non-tabular
+  403), maritime AIS, Port of LA/LB. ShippingRates.org rejected (25 req/mo/IP then 402).
+- **2026-08-09**: **Built Eurostat rail freight source** (`sources/eurostat_rail.py`,
+  model `EurostatRailFreight`, storage table `rail_eurostat_freight`, wired into pipeline
+  as `eurostat`). No key. JSON-stat `rail_go_total`, 2004+, 37 geos, units THS_T/MIO_TKM.
+  Live run wrote 1,329 records partitioned per year (2004–2025). **Found + fixed two
+  real bugs via the live run**: (1) dataset id was missing from the URL path in both
+  `validate()` and `_fetch_dataset()` — unit tests mocked the base URL so they passed but
+  live fetch 404'd; (2) `storage._write_table` partitioned every batch by
+  `records[0].snapshot_date`, so a multi-year series (2004–2025) all landed in `year=2004`
+  — rewritten to group records by their own `snapshot_date` and write one partition per
+  date (backward-compatible: single-date sources unaffected; FRA has no `snapshot_date`
+  so falls back to `dt`).
+- **2026-08-09**: **Built FRED source** (`sources/fred.py`, wired as `fred`). Series in
+  `config.fred_series`: Cass Shipments `FRGSHPUSM649NCIS`, Cass Expenditures
+  `FRGEXPUSM649NCIS`, ATA Truck Tonnage `TRUCKD11`. Reuses `FreightIndicator` → writes to
+  `freight_indicators`. Requires `FRED_API_KEY`; without it, fetch returns success with 0
+  records + warning (graceful). Live run deferred until key exists (user TODO).
+- **2026-08-09**: Fixed 11 pre-existing ruff E501s in `models/schemas.py`,
+  `sources/bts_freight_indicators.py`, `sources/fra_safety.py`, and 1 format drift in
+  `sources/usda_agtransport.py`, so `ruff check src/` and `ruff format --check src/` pass
+  clean. Gate status: 82 tests pass, ruff clean, mypy clean.
 
 ## Open items
 
+- **External key signups (user TODOs, add to task list)**: `FRED_API_KEY`
+  (fred.stlouisfed.org/docs/api/api_key.html), EIA API v2 (eia.gov/opendata), BLS API v2
+  (500 req/day registered), Census `api.census.gov` key, UN Comtrade key (comtradedeveloper
+  .un.org), USDA Socrata app token (optional rate bump). Once `FRED_API_KEY` exists, run
+  `freight-pipe run --sources fred` live.
 - **Freightos API key** — external action only Zander can take (freightos.com signup).
   Blocks the ocean-freight-rate half of the pipeline; USDA rail data does not need it.
-- **GO-flagged sources not yet built**: STB Rail Service Data, BTS Freight Indicators/
-  TransBorder/FAF6, FRA Safety, EIA, FRED — see `US_DOMESTIC_FREIGHT_SOURCES.md` for the
+- **GO-flagged sources not yet built**: STB Rail Service Data, BTS TransBorder (bulk/
+  ArcGIS path — Socrata table is non-tabular/403), BTS FAF6, EIA, BLS PPI, Census Intl
+  Trade, UN Comtrade, FMC quarterly XLSX — see `US_DOMESTIC_FREIGHT_SOURCES.md` for the
   full source-vetting backlog with GO/NO-GO calls per source.
 - **HuggingFace sync**: script exists, needs a real data upload once USDA collection
   (and eventually Freightos) has produced rows worth publishing.

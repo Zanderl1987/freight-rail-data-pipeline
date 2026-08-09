@@ -44,7 +44,9 @@ class BTSFreightIndicatorsSource(BaseSource):
             self._close_client()
         return warnings
 
-    def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[FreightIndicator]:
+    def fetch(
+        self, snapshot_date: date | None = None, **kwargs: Any
+    ) -> SourceResult[FreightIndicator]:
         self.log.info("Fetching freight indicators from BTS...")
         raw_results = self._fetch_indicators(snapshot_date)
 

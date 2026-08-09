@@ -1,5 +1,7 @@
 from .normalizer import DataNormalizer
 from .schemas import (
+    EurostatRailFreight,
+    EurostatRailFreightBatch,
     FreightIndicator,
     FreightIndicatorBatch,
     MotorCarrierCensus,
@@ -32,6 +34,8 @@ __all__ = [
     "RailSafetyIncidentBatch",
     "MotorCarrierCensus",
     "MotorCarrierCensusBatch",
+    "EurostatRailFreight",
+    "EurostatRailFreightBatch",
     "PipelineRunSummary",
     "DataNormalizer",
 ]

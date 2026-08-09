@@ -10,6 +10,7 @@ from . import sources as src
 from .config import PipelineConfig
 from .logging_setup import setup_logging
 from .models.schemas import (
+    EurostatRailFreightBatch,
     FreightIndicatorBatch,
     MotorCarrierCensusBatch,
     OceanFreightRateBatch,
@@ -53,6 +54,8 @@ class FreightPipeline:
             "bts": src.BTSFreightIndicatorsSource(self.config),
             "fra": src.FRASafetySource(self.config),
             "fmcsa": src.FMCSACarrierCensusSource(self.config),
+            "eurostat": src.EurostatRailSource(self.config),
+            "fred": src.FREDSource(self.config),
         }
 
     def run(
@@ -191,6 +194,13 @@ class FreightPipeline:
         if si_records:
             written += self.storage.write_rail_safety_incidents(
                 RailSafetyIncidentBatch(records=si_records),
+                dt=snapshot_date,
+            )
+
+        er_records = [r for r in records if type(r).__name__ == "EurostatRailFreight"]
+        if er_records:
+            written += self.storage.write_rail_eurostat_freight(
+                EurostatRailFreightBatch(records=er_records),
                 dt=snapshot_date,
             )
 

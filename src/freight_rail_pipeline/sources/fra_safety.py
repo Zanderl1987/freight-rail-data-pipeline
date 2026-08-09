@@ -44,12 +44,16 @@ class FRASafetySource(BaseSource):
                 client.get(resource_id, limit=1)
                 self.log.info("FRA Safety resource %s (%s) verified", incident_type, resource_id)
             except Exception as exc:
-                warnings.append(f"FRA Safety resource {incident_type} ({resource_id}) failed: {exc}")
+                warnings.append(
+                    f"FRA Safety resource {incident_type} ({resource_id}) failed: {exc}"
+                )
             finally:
                 self._close_client()
         return warnings
 
-    def fetch(self, snapshot_date: date | None = None, **kwargs: Any) -> SourceResult[RailSafetyIncident]:
+    def fetch(
+        self, snapshot_date: date | None = None, **kwargs: Any
+    ) -> SourceResult[RailSafetyIncident]:
         self.log.info("Fetching rail safety incidents from FRA...")
         normalizer = DataNormalizer()
         normalized: list[RailSafetyIncident] = []
