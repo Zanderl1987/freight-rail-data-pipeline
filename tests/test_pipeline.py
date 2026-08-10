@@ -117,7 +117,7 @@ class TestFreightPipeline:
 
     def test_pipeline_output_dir_created(self) -> None:
         config = self.make_config()
-        pipeline = FreightPipeline(config)
+        FreightPipeline(config)
         assert config.output_dir.exists()
         assert config.log_dir.exists()
 

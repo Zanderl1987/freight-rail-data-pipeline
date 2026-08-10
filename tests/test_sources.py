@@ -32,7 +32,9 @@ class TestUSDAgTransportSource:
         return USDAgTransportSource(config)
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
-    def test_fetch_carloadings_returns_records(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+    def test_fetch_carloadings_returns_records(
+        self, mock_socrata: MagicMock, source: USDAgTransportSource
+    ) -> None:
         mock_client = MagicMock()
         mock_socrata.return_value = mock_client
         mock_client.get.return_value = [
@@ -59,7 +61,9 @@ class TestUSDAgTransportSource:
         assert all(isinstance(r.traffic_type, str) for r in result.records)
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
-    def test_fetch_service_metrics(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+    def test_fetch_service_metrics(
+        self, mock_socrata: MagicMock, source: USDAgTransportSource
+    ) -> None:
         mock_client = MagicMock()
         mock_socrata.return_value = mock_client
         mock_client.get.return_value = [
@@ -81,7 +85,9 @@ class TestUSDAgTransportSource:
         assert metric.segment == "Automotive"
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
-    def test_fetch_handles_empty_response(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+    def test_fetch_handles_empty_response(
+        self, mock_socrata: MagicMock, source: USDAgTransportSource
+    ) -> None:
         mock_client = MagicMock()
         mock_socrata.return_value = mock_client
         mock_client.get.return_value = []
@@ -151,7 +157,9 @@ class TestUSDAgTransportSource:
         assert tariff.fuel_surcharge == Decimal("523.84")
 
     @patch("freight_rail_pipeline.sources.usda_agtransport.Socrata")
-    def test_validate_connectivity(self, mock_socrata: MagicMock, source: USDAgTransportSource) -> None:
+    def test_validate_connectivity(
+        self, mock_socrata: MagicMock, source: USDAgTransportSource
+    ) -> None:
         mock_client = MagicMock()
         mock_socrata.return_value = mock_client
         mock_client.get.return_value = [{"date": "2026-07-25T00:00:00.000"}]
@@ -661,7 +669,11 @@ class TestEurostatRailSource:
         assert de_tonnes[0].metric == "rail_goods_tonnes"
         assert de_tonnes[0].country_name == "Germany"
 
-        eu_tkm = [r for r in result.records if r.country_code == "EU27_2020" and r.unit == "MIO_TKM"]
+        eu_tkm = [
+            r
+            for r in result.records
+            if r.country_code == "EU27_2020" and r.unit == "MIO_TKM"
+        ]
         assert eu_tkm[0].value == 100000.0
         assert eu_tkm[0].metric == "rail_goods_tonne_km"
 
@@ -731,7 +743,6 @@ class TestFREDSource:
         )
         source = FREDSource(config)
 
-        series_id = "FRGSHPUSM649NCIS"
         url = (
             "https://api.stlouisfed.org/fred/series/observations"
             "?series_id=FRGSHPUSM649NCIS&api_key=test-key&file_type=json"

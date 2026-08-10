@@ -7,8 +7,11 @@ Usage:
 from __future__ import annotations
 
 if __name__ == "__main__":
-    import subprocess, sys
+    import subprocess
+    import sys
     from pathlib import Path
 
-    dashboard = Path(__file__).resolve().parent.parent / "src" / "freight_rail_pipeline" / "reporting" / "dashboard.py"
-    sys.exit(subprocess.run([sys.executable, "-m", "streamlit", "run", str(dashboard)]).returncode)
+    _repo_root = Path(__file__).resolve().parent.parent
+    dashboard = _repo_root / "src" / "freight_rail_pipeline" / "reporting" / "dashboard.py"
+    # S603: argv is a fixed list (sys.executable + literal args), no user input.
+    sys.exit(subprocess.run([sys.executable, "-m", "streamlit", "run", str(dashboard)]).returncode)  # noqa: S603

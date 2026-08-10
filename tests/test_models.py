@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 
 from freight_rail_pipeline.models.schemas import (
     OceanFreightRate,
@@ -11,14 +11,15 @@ from freight_rail_pipeline.models.schemas import (
     RailCarloading,
     RailCarloadingBatch,
     RailServiceMetric,
-    RailServiceMetricBatch,
     RailTariffRate,
 )
 
 
 class TestRailCarloading:
     def test_minimal_valid(self) -> None:
-        r = RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=100)
+        r = RailCarloading(
+            snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=100
+        )
         assert r.railroad == "BNSF"
         assert r.carloads == 100
         assert r.source == "usda_agtransport"
@@ -26,11 +27,15 @@ class TestRailCarloading:
 
     def test_negative_carloads_raises(self) -> None:
         with pytest.raises(ValidationError):
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=-1)
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=-1
+            )
 
     def test_batch(self) -> None:
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=100),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=100
+            ),
         ])
         assert batch.count == 1
         assert batch.source == "usda_agtransport"

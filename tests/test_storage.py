@@ -39,8 +39,12 @@ class TestStorageWriter:
         writer = StorageWriter(config)
 
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500),
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="UP", commodity="Coal", carloads=3200),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500
+            ),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="UP", commodity="Coal", carloads=3200
+            ),
         ])
 
         count = writer.write_carloadings(batch, dt=date(2026, 7, 15))
@@ -91,11 +95,20 @@ class TestStorageWriter:
         writer = StorageWriter(config)
 
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="CSX", commodity="Chemicals", carloads=500),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="CSX", commodity="Chemicals", carloads=500
+            ),
         ])
         writer.write_carloadings(batch, dt=date(2026, 7, 15))
 
-        expected_path = self._test_dir / "freight" / "rail_carloadings" / "year=2026" / "month=07" / "day=15"
+        expected_path = (
+            self._test_dir
+            / "freight"
+            / "rail_carloadings"
+            / "year=2026"
+            / "month=07"
+            / "day=15"
+        )
         assert expected_path.exists()
         assert (expected_path / "rail_carloadings.parquet").exists()
 
@@ -113,7 +126,9 @@ class TestStorageWriter:
         writer = StorageWriter(config)
 
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="NS", commodity="Intermodal", carloads=800),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="NS", commodity="Intermodal", carloads=800
+            ),
         ])
         writer.write_carloadings(batch)
         assert len(writer.list_written()) > 0
@@ -128,8 +143,12 @@ class TestStorageWriter:
         writer = StorageWriter(config)
 
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2020, 1, 15), railroad="BNSF", commodity="Grain", carloads=1500),
-            RailCarloading(snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200),
+            RailCarloading(
+                snapshot_date=date(2020, 1, 15), railroad="BNSF", commodity="Grain", carloads=1500
+            ),
+            RailCarloading(
+                snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200
+            ),
         ])
         writer.write_carloadings(batch, dt=date(2026, 7, 15))
 
@@ -147,7 +166,9 @@ class TestStorageWriter:
         writer = StorageWriter(config)
 
         batch = RailCarloadingBatch(records=[
-            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500),
+            RailCarloading(
+                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500
+            ),
         ])
         with pytest.raises(ValueError, match="Unknown table"):
             writer._write_table("no_such_table", batch.records, dt=date(2026, 7, 15))

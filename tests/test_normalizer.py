@@ -42,7 +42,11 @@ class TestRailCarloadingNormalizer:
         # Real USDA data reports fractional carloads (e.g. prorated across a
         # mixed-commodity car) -- confirmed live 2026-08-03, was silently
         # dropping the record when carloads was typed int.
-        raw = {"railroad": "CPKC", "commodity": "Pulp, Paper and Allied Products", "carloads": "811.5"}
+        raw = {
+            "railroad": "CPKC",
+            "commodity": "Pulp, Paper and Allied Products",
+            "carloads": "811.5",
+        }
         result = DataNormalizer.normalize_rail_carloading(raw)
         assert result is not None
         assert result.carloads == 811.5
