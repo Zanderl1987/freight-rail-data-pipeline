@@ -11,11 +11,13 @@ import responses
 
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
+from freight_rail_pipeline.sources.eurostat_rail import DATASET_ID, EurostatRailSource
 from freight_rail_pipeline.sources.fmcsa_carrier_census import (
     SELECT_COLUMNS,
     FMCSACarrierCensusSource,
 )
 from freight_rail_pipeline.sources.fra_safety import FRASafetySource
+from freight_rail_pipeline.sources.fred import FREDSource
 from freight_rail_pipeline.sources.freightos_fbx import FBX_ROUTES, FreightosFBXSource
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
 
@@ -581,3 +583,181 @@ class TestFreightosFBXSource:
         responses.add(responses.GET, re.compile(rf"{re.escape(base)}.*"), status=200, json=[])
         warnings = keyed_source.validate()
         assert warnings == []
+
+
+class TestEurostatRailSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> EurostatRailSource:
+        return EurostatRailSource(config)
+
+    @staticmethod
+    def _jsonstat_payload() -> dict[str, object]:
+        # Shape mirrors the real rail_go_total response (size [1,2,37,22]),
+        # trimmed to 1 freq x 2 units x 2 geos x 2 years for a compact fixture.
+        return {
+            "label": "Goods transported",
+            "dimension": {
+                "freq": {"category": {"index": {"A": 0}, "label": {"A": "Annual"}}},
+                "unit": {
+                    "category": {
+                        "index": {"THS_T": 0, "MIO_TKM": 1},
+                        "label": {"THS_T": "Thousand tonnes", "MIO_TKM": "Million tonne-km"},
+                    }
+                },
+                "geo": {
+                    "category": {
+                        "index": {"DE": 0, "EU27_2020": 1},
+                        "label": {
+                            "DE": "Germany",
+                            "EU27_2020": "European Union - 27 countries (from 2020)",
+                        },
+                    }
+                },
+                "time": {
+                    "category": {
+                        "index": {"2004": 0, "2005": 1},
+                        "label": {"2004": "2004", "2005": "2005"},
+                    }
+                },
+            },
+            "size": [1, 2, 2, 2],
+            # flat row-major: A/THS_T/DE/2004, A/THS_T/DE/2005, A/THS_T/EU/2004, ...
+            "value": {
+                "0": 123.5,
+                "1": 130.1,
+                "2": 900.0,
+                "3": 910.5,
+                "4": 18757,
+                "5": 19000,
+                "6": 100000,
+                "7": 101000,
+            },
+        }
+
+    @responses.activate
+    def test_fetch_returns_normalized_records(self, source: EurostatRailSource) -> None:
+        responses.add(
+            responses.GET,
+            f"{source.config.eurostat_base_url}/{DATASET_ID}",
+            json=self._jsonstat_payload(),
+            status=200,
+        )
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 8
+        assert result.source_name == "eurostat"
+        assert result.metadata["dataset_id"] == "rail_go_total"
+
+        de_tonnes = [r for r in result.records if r.country_code == "DE" and r.unit == "THS_T"]
+        assert len(de_tonnes) == 2
+        assert de_tonnes[0].period == "2004"
+        assert de_tonnes[0].value == 123.5
+        assert de_tonnes[0].snapshot_date == date(2004, 12, 31)
+        assert de_tonnes[0].metric == "rail_goods_tonnes"
+        assert de_tonnes[0].country_name == "Germany"
+
+        eu_tkm = [r for r in result.records if r.country_code == "EU27_2020" and r.unit == "MIO_TKM"]
+        assert eu_tkm[0].value == 100000.0
+        assert eu_tkm[0].metric == "rail_goods_tonne_km"
+
+    @responses.activate
+    def test_fetch_skips_missing_string_values(self, source: EurostatRailSource) -> None:
+        payload = self._jsonstat_payload()
+        payload["value"] = {"0": 123.5, "1": ":", "2": 900.0, "4": 18757}  # type: ignore[assignment]
+
+        responses.add(
+            responses.GET,
+            f"{source.config.eurostat_base_url}/{DATASET_ID}",
+            json=payload,
+            status=200,
+        )
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 3
+        assert all(r.value > 0 for r in result.records)
+
+    @responses.activate
+    def test_fetch_handles_malformed_dimensions(self, source: EurostatRailSource) -> None:
+        responses.add(
+            responses.GET,
+            f"{source.config.eurostat_base_url}/{DATASET_ID}",
+            json={"label": "unexpected", "value": {}},
+            status=200,
+        )
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.records == []
+
+    @responses.activate
+    def test_validate_reports_http_error(self, source: EurostatRailSource) -> None:
+        responses.add(responses.GET, f"{source.config.eurostat_base_url}/{DATASET_ID}", status=503)
+
+        warnings = source.validate()
+        assert any("HTTP 503" in w for w in warnings)
+
+
+class TestFREDSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> FREDSource:
+        return FREDSource(config)
+
+    def test_validate_warns_without_key(self, source: FREDSource) -> None:
+        warnings = source.validate()
+        assert any("FRED_API_KEY" in w for w in warnings)
+
+    def test_fetch_skips_without_key(self, source: FREDSource) -> None:
+        result = source.fetch()
+        assert result.success is True
+        assert result.records == []
+        assert result.metadata.get("skipped") is not None
+
+    @responses.activate
+    def test_fetch_returns_normalized_records_with_key(self, source: FREDSource) -> None:
+        config = PipelineConfig(
+            output_dir="tests/_test_output",
+            log_dir="tests/_test_output/logs",
+            fred_api_key="test-key",
+        )
+        source = FREDSource(config)
+
+        series_id = "FRGSHPUSM649NCIS"
+        url = (
+            "https://api.stlouisfed.org/fred/series/observations"
+            "?series_id=FRGSHPUSM649NCIS&api_key=test-key&file_type=json"
+        )
+        responses.add(
+            responses.GET,
+            url,
+            match_querystring=True,
+            json={
+                "realtime_start": "2026-06-29",
+                "observations": [
+                    {"date": "2026-01-01", "value": "1.009"},
+                    {"date": "2026-02-01", "value": "."},
+                    {"date": "2026-03-01", "value": "1.054"},
+                ],
+            },
+            status=200,
+        )
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 2
+
+        rec = result.records[0]
+        assert rec.external_id == "FRGSHPUSM649NCIS_2026-01-01"
+        assert rec.indicator == "Cass Freight Index: Shipments"
+        assert rec.value == 1.009
+        assert rec.snapshot_date == date(2026, 1, 1)
+        assert rec.underlying_source == "Cass Information Systems"

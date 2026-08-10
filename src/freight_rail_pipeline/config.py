@@ -41,6 +41,29 @@ class PipelineConfig:
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         object.__setattr__(self, "log_dir", Path(self.log_dir))
 
+    eurostat_base_url: str = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
+
+    fred_api_key: str = os.getenv("FRED_API_KEY", "")
+    fred_series: dict[str, dict[str, str]] = field(
+        default_factory=lambda: {
+            "FRGSHPUSM649NCIS": {
+                "title": "Cass Freight Index: Shipments",
+                "source": "Cass Information Systems",
+                "units": "Index Jan 1990=1",
+            },
+            "FRGEXPUSM649NCIS": {
+                "title": "Cass Freight Index: Expenditures",
+                "source": "Cass Information Systems",
+                "units": "Index Jan 1990=1",
+            },
+            "TRUCKD11": {
+                "title": "Truck Tonnage Index",
+                "source": "BTS / American Trucking Association",
+                "units": "Index 2015=100",
+            },
+        }
+    )
+
     @classmethod
     def from_env(cls) -> PipelineConfig:
         return cls(

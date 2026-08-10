@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .schemas import (
+    EurostatRailFreight,
     FreightIndicator,
     MotorCarrierCensus,
     OceanFreightRate,
@@ -315,6 +316,45 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize rail tariff rate record: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def normalize_eurostat_rail(
+        raw: dict[str, Any],
+    ) -> EurostatRailFreight | None:
+        """Normalize one decoded Eurostat `rail_go_total` observation. `raw` is a
+        flat dict built by the Eurostat source with fields: country_code,
+        country_name, unit, period, value. Missing/blank values are dropped by the
+        source before this is called, so a non-numeric value here is unexpected."""
+        try:
+            country_code = raw.get("country_code")
+            period = raw.get("period")
+            unit = raw.get("unit")
+            value = raw.get("value")
+            if not country_code or not period or not unit or value is None:
+                return None
+
+            try:
+                year = int(period)
+                snapshot_date = date(year, 12, 31)
+            except (ValueError, TypeError):
+                log.warning("Failed to parse Eurostat period %r; record dropped", raw.get("period"))
+                return None
+
+            metric = "rail_goods_tonnes" if unit == "THS_T" else "rail_goods_tonne_km"
+
+            return EurostatRailFreight(
+                snapshot_date=snapshot_date,
+                period=str(period),
+                country_code=str(country_code),
+                country_name=raw.get("country_name"),
+                unit=str(unit),
+                metric=metric,
+                value=float(value),
+                raw_record=raw,
+            )
+        except (ValueError, TypeError) as exc:
+            log.warning("Failed to normalize Eurostat rail record: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod

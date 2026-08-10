@@ -122,8 +122,7 @@ class FreightIndicator(BaseModel):
     )
     snapshot_date: date = Field(..., description="Date of the reported observation")
     indicator: str = Field(
-        ...,
-        description="Indicator name, e.g. 'Truck Spot Rates in $ per Mile by Truck Type'",
+        ..., description="Indicator name, e.g. 'Truck Spot Rates in $ per Mile by Truck Type'"
     )
     measure1: str | None = Field(
         default=None, description="Primary breakdown dimension, e.g. terminal or truck type"
@@ -219,6 +218,38 @@ class MotorCarrierCensus(BaseModel):
 class MotorCarrierCensusBatch(BaseModel):
     records: list[MotorCarrierCensus]
     source: str = "fmcsa_carrier_census"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+class EurostatRailFreight(BaseModel):
+    """A single annual rail-freight observation for one country/aggregate from
+    Eurostat's `rail_go_total` dataset ("Goods transported" by rail).
+
+    The dataset reports two complementary units per country/year -- thousand
+    tonnes of goods carried (THS_T) and million tonne-kilometres of freight
+    traffic (MIO_TKM) -- which land as separate rows so each observation has a
+    single unit/value. `metric` gives the friendly label for the unit."""
+
+    source: str = Field(default="eurostat")
+    snapshot_date: date = Field(..., description="Period-end date of the annual observation")
+    period: str = Field(..., description="Annual period, e.g. '2024'")
+    country_code: str = Field(..., description="Eurostat geo code, e.g. 'DE', 'EU27_2020'")
+    country_name: str | None = Field(default=None, description="Eurostat geo label, e.g. 'Germany'")
+    unit: str = Field(..., description="Eurostat unit code: THS_T or MIO_TKM")
+    metric: str = Field(
+        ..., description="rail_goods_tonnes (THS_T) or rail_goods_tonne_km (MIO_TKM)"
+    )
+    value: float = Field(..., description="Observed value")
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class EurostatRailFreightBatch(BaseModel):
+    records: list[EurostatRailFreight]
+    source: str = "eurostat"
 
     @property
     def count(self) -> int:
