@@ -101,25 +101,47 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   HF dataset built from it) is physically laid out that way; adopting ingestion-date
   partitioning now would mean repartitioning everything. **DECISION-002 is therefore
   superseded** — there is a comment in `_write_table` saying so, to stop it being
-  reintroduced. The rest of PR #1's `storage.py` work was kept: `_schema_for_model` now
+  reintroduced. The rest of PR #1's `storage.py` work was kept:   `_schema_for_model` now
   raises `ValueError` on an unknown table instead of silently returning an empty schema
   and writing an empty Parquet while logging success (verified safe — all 8 tables passed
   to `_write_table` have registered schemas), two dead helpers removed
   (`_pydantic_to_pyarrow`, `_json_serialize_raw`), and `write_summary` simplified.
+- **2026-08-10**: **Gate cleanup (ruff 329 errors → 0)**. `ruff check .` (whole repo)
+  had 329 violations. Fixed: added `[tool.ruff.lint.per-file-ignores] "tests/**" =
+  ["S101","S110"]` to `pyproject.toml` (asserts + asserts-in-finally in tests), auto-fixed
+  import issues, manually fixed F841 (test_pipeline.py, test_sources.py), E501 long lines
+  in tests/test_models.py, test_normalizer.py, test_sources.py, test_storage.py, and
+  scripts/run_dashboard.py (E401/I001/E501/S603). Result: `ruff check .` = **All checks
+  passed**; mypy clean; 98 tests pass. Installed pre-commit 4.6.1 (only missing dev dep).
+  Committed + pushed (`d7c0201`).
+- **2026-08-10**: **Full data refresh** — `freight-pipe run` (all 5 runnable sources:
+  usda, bts, fra, fmcsa, eurostat) succeeded: **4,348,342 records**, run summary
+  `data/pipeline_runs/run_20260810_210252_ce9278.json`, `success=true`, all 7 data tables
+  updated 2026-08-10. Detour worth remembering: the first retry was killed by the shell
+  tool's 20-min timeout (its 120s default kills child process trees on Windows), so the
+  run was relaunched detached via `Start-Process` — which actually completed successfully.
+  A temporary scheduled task (`FreightRailRefresh`) used as an alternative launcher was
+  Ctrl+C'd and deleted; no lingering python processes after. Long runs on this machine
+  should be launched detached and polled for the run JSON, not run in a blocking shell.
+- **2026-08-10**: Verified repo state clean + pushed (`d7c0201`); remote `main` at
+  `d7c0201`, 0 ahead/0 behind.
 
 ## Open items
 
 - **External key signups (user TODOs, add to task list)**: `FRED_API_KEY`
   (fred.stlouisfed.org/docs/api/api_key.html), EIA API v2 (eia.gov/opendata), BLS API v2
   (500 req/day registered), Census `api.census.gov` key, UN Comtrade key (comtradedeveloper
-  .un.org), USDA Socrata app token (optional rate bump). Once `FRED_API_KEY` exists, run
-  `freight-pipe run --sources fred` live.
+  .un.org), USDA Socrata app token (optional rate bump — local `.env` value is empty).
+  Once `FRED_API_KEY` exists, run `freight-pipe run --sources fred` live. (FRED source
+  built 8/9, still never run against a real key.)
 - **Freightos API key** — external action only Zander can take (freightos.com signup).
   Blocks the ocean-freight-rate half of the pipeline; USDA rail data does not need it.
 - **GO-flagged sources not yet built**: STB Rail Service Data, BTS TransBorder (bulk/
   ArcGIS path — Socrata table is non-tabular/403), BTS FAF6, EIA, BLS PPI, Census Intl
   Trade, UN Comtrade, FMC quarterly XLSX — see `US_DOMESTIC_FREIGHT_SOURCES.md` for the
   full source-vetting backlog with GO/NO-GO calls per source.
-- **HuggingFace sync**: currently at 7 tables / 4,345,102 rows / 144.73 MB (synced
-  2026-08-09, includes `rail_eurostat_freight`). **Re-sync after the PR #1 merge** — it
-  brings in the motor-carrier-census table.
+- **HuggingFace sync**: last synced 2026-08-09 (7 tables / 4,345,102 rows / 144.73 MB,
+  includes `rail_eurostat_freight`). The PR #1 merge brings in the motor-carrier-census
+  table, and the 2026-08-10 refresh updated all 7 tables (now 4,348,342 records) — **the
+  HF dataset is behind the current local store by one run.** Re-run `upload_huggingface.py`
+  next time HF freshness matters.
