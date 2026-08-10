@@ -10,7 +10,7 @@ from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponenti
 from ..config import PipelineConfig
 from ..models import OceanFreightRate
 from ..models.normalizer import DataNormalizer
-from .base import BaseSource, SourceResult
+from .base import BaseSource, SourceResult, retry_if_transient
 
 log = logging.getLogger(__name__)
 
@@ -84,8 +84,6 @@ FBX_ROUTES: list[dict[str, str]] = [
     {"route_code": "FBX41", "description": "Intra-Asia", "origin": "CNSHA", "destination": "SGSIN"},
 ]
 
-CONTAINER_TYPES = ["20GP", "40GP", "40HC"]
-
 
 class FreightosFBXSource(BaseSource):
     def __init__(self, config: PipelineConfig) -> None:
@@ -111,8 +109,12 @@ class FreightosFBXSource(BaseSource):
                 headers=headers,
                 timeout=self.config.request_timeout_seconds,
             )
-            if resp.status_code in (200, 401, 404):
-                self.log.info("Freightos API reachable (HTTP %d)", resp.status_code)
+            if resp.status_code == 401:
+                warnings.append(
+                    "Freightos API rejected the configured API key (HTTP 401) — fetch will fail"
+                )
+            elif resp.status_code == 200:
+                self.log.info("Freightos API reachable (HTTP 200)")
             else:
                 warnings.append(f"Freightos API returned HTTP {resp.status_code}")
         except requests.ConnectionError as exc:
@@ -127,7 +129,7 @@ class FreightosFBXSource(BaseSource):
         normalizer = DataNormalizer()
         normalized = []
         for raw in raw_results:
-            record = normalizer.normalize_ocean_freight_rate(raw)
+            record = normalizer.normalize_ocean_freight_rate(raw, snapshot_date=snapshot_date)
             if record is not None:
                 normalized.append(record)
 
@@ -144,6 +146,7 @@ class FreightosFBXSource(BaseSource):
 
     def _fetch_all_routes(self) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
+        failures: list[str] = []
         for route in FBX_ROUTES:
             for container_type in ["40GP"]:
                 try:
@@ -153,11 +156,18 @@ class FreightosFBXSource(BaseSource):
                         rate["route_description"] = route["description"]
                     results.extend(rates)
                 except Exception as exc:
+                    failures.append(f"{route['route_code']}: {exc}")
                     self.log.warning(
                         "Failed to fetch route %s: %s",
                         route["route_code"],
                         exc,
                     )
+        if not results and failures:
+            # Every route failed (e.g. rejected API key, or Freightos outage).
+            # Do not report a green run with zero ocean rates.
+            raise RuntimeError(
+                "Freightos FBX fetch failed for all routes: " + "; ".join(failures[:3])
+            )
         return results
 
     def _request_headers(self) -> dict[str, str]:
@@ -171,6 +181,7 @@ class FreightosFBXSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_route(
         self, origin: str, destination: str, container_type: str
@@ -192,8 +203,11 @@ class FreightosFBXSource(BaseSource):
         )
 
         if resp.status_code == 401:
-            self.log.warning("FBX API rejected API key (HTTP 401)")
-            return []
+            # Wrong/missing key is an auth error, not an empty result. Fail
+            # loudly so a blocked source never reports a green run.
+            raise RuntimeError(
+                "Freightos FBX API rejected API key (HTTP 401) — check FREIGHTOS_FBX_API_KEY"
+            )
 
         if resp.status_code == 404:
             self.log.debug("No rate data for %s → %s (%s)", origin, destination, container_type)

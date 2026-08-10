@@ -10,7 +10,7 @@ from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponenti
 from ..config import PipelineConfig
 from ..models import FreightIndicator
 from ..models.normalizer import DataNormalizer
-from .base import BaseSource, SourceResult
+from .base import BaseSource, SourceResult, retry_if_transient
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ class BTSFreightIndicatorsSource(BaseSource):
         wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
         before_sleep=before_sleep_log(log, logging.WARNING),
         reraise=True,
+        retry=retry_if_transient,
     )
     def _fetch_indicators(self, snapshot_date: date | None = None) -> list[dict[str, Any]]:
         client = self._get_client()

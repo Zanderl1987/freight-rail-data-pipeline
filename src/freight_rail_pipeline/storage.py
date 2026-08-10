@@ -30,24 +30,6 @@ def _partition_path(base: Path, source: str, table: str, dt: date) -> Path:
     return base / source / table / f"year={dt.year}" / f"month={dt.month:02d}" / f"day={dt.day:02d}"
 
 
-def _pydantic_to_pyarrow(
-    records: Sequence[BaseModel],
-    schema: pa.Schema,
-) -> pa.Table:
-    data: list[dict[str, object]] = [r.model_dump(mode="python") for r in records]
-    df = pd.DataFrame(data)
-
-    for field in schema:
-        if field.name in df.columns:
-            if pa.types.is_timestamp(field.type):
-                df[field.name] = pd.to_datetime(df[field.name])
-            elif pa.types.is_date(field.type):
-                df[field.name] = pd.to_datetime(df[field.name]).dt.date
-
-    table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
-    return table
-
-
 def _schema_for_model(table_name: str) -> pa.Schema:
     schemas: dict[str, pa.Schema] = {
         "rail_carloadings": pa.schema(
@@ -178,19 +160,12 @@ def _schema_for_model(table_name: str) -> pa.Schema:
             ]
         ),
     }
-    return schemas.get(table_name, pa.schema([]))
-
-
-def _json_serialize_raw(records: Sequence[BaseModel]) -> list[dict[str, object]]:
-    import json
-
-    result: list[dict[str, object]] = []
-    for r in records:
-        d = r.model_dump(mode="python")
-        if d.get("raw_record") is not None:
-            d["raw_record"] = json.dumps(d["raw_record"], default=str)
-        result.append(d)
-    return result
+    try:
+        return schemas[table_name]
+    except KeyError as exc:
+        # An unknown table would write a silently-empty Parquet while logging
+        # success -- fail instead of corrupting the store.
+        raise ValueError(f"Unknown table: {table_name}") from exc
 
 
 class StorageWriter:
@@ -282,6 +257,12 @@ class StorageWriter:
 
         schema = _schema_for_model(table_name)
 
+        # Partition per record's own snapshot_date. This supersedes DECISION-002
+        # (partition everything on the ingestion date): both were answers to the
+        # same bug -- keying a whole batch on records[0].snapshot_date mislabels
+        # years of data when a run fetches full history -- but per-record
+        # partitioning is what the live store is physically laid out with, so
+        # switching to ingestion-date would require repartitioning everything.
         def partition_date(record: BaseModel) -> date:
             snapshot = getattr(record, "snapshot_date", None)
             if not isinstance(snapshot, date):
@@ -337,21 +318,9 @@ class StorageWriter:
     def write_summary(self, summary: PipelineRunSummary) -> None:
         summary_file = self.output_dir / "pipeline_runs" / f"{summary.run_id}.json"
         summary_file.parent.mkdir(parents=True, exist_ok=True)
-        import json
-        from datetime import date, datetime
-
-        def serialize(obj: object) -> str:
-            if isinstance(obj, (date, datetime)):
-                return obj.isoformat()
-            return str(obj)
 
         with open(summary_file, "w") as f:
-            json.dump(
-                json.loads(summary.model_dump_json()),
-                f,
-                indent=2,
-                default=serialize,
-            )
+            f.write(summary.model_dump_json(indent=2))
         log.info("Wrote pipeline summary to %s", summary_file)
         self.written_paths.append(str(summary_file))
 

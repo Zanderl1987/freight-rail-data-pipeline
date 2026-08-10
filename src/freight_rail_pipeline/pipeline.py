@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
+from uuid import uuid4
 
 from . import sources as src
 from .config import PipelineConfig
@@ -64,7 +65,9 @@ class FreightPipeline:
         snapshot_date: date | None = None,
     ) -> PipelineResult:
         start = time.monotonic()
-        run_id = datetime.now(UTC).strftime("run_%Y%m%d_%H%M%S")
+        # A timestamp alone collides for two runs in the same second and one
+        # summary file silently overwrites the other.
+        run_id = f"{datetime.now(UTC).strftime('run_%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}"
         log.info("Pipeline run %s starting — sources=%s", run_id, sources or list(self._sources))
 
         summary = PipelineRunSummary(
@@ -80,12 +83,24 @@ class FreightPipeline:
             log.info("=== Running source: %s ===", name)
             try:
                 source_result = source.fetch(snapshot_date=snapshot_date)
+                if not source_result.success:
+                    # Structural backstop for sources that signal a soft
+                    # failure via SourceResult.success=False (rather than an
+                    # exception). Still write whatever records came back.
+                    message = source_result.error or f"Source {name} reported failure"
+                    log.warning("%s", message)
+                    summary.sources_failed.append(name)
+                    result.failed_sources.append(name)
+                    result.errors.append(f"{name}: {message}")
+                    result.success = False
+                    summary.errors.append(message)
                 source_result_written = self._write_source_output(
                     name, source_result, snapshot_date
                 )
                 result.source_results[name] = source_result_written
                 result.total_records += source_result_written
-                summary.sources_succeeded.append(name)
+                if name not in result.failed_sources:
+                    summary.sources_succeeded.append(name)
                 log.info(
                     "Source %s completed: %d records written",
                     name,
@@ -126,14 +141,20 @@ class FreightPipeline:
         return {name: source.validate() for name, source in self._sources.items()}
 
     def _resolve_sources(self, names: list[str] | None) -> dict[str, src.BaseSource]:
-        if not names:
+        if names is None:
             return dict(self._sources)
+        if not names:
+            raise ValueError("No sources specified; pass at least one name or omit the argument")
         resolved: dict[str, src.BaseSource] = {}
         for name in names:
             if name in self._sources:
                 resolved[name] = self._sources[name]
             else:
-                log.warning("Unknown source '%s', skipping", name)
+                # Never silently skip a typo'd source name -- the run would
+                # finish green with zero records.
+                raise ValueError(
+                    f"Unknown source '{name}'. Available: {', '.join(sorted(self._sources))}"
+                )
         return resolved
 
     def _write_source_output(

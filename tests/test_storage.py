@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.parquet as pq
+import pytest
 
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.models.schemas import (
@@ -117,3 +117,37 @@ class TestStorageWriter:
         ])
         writer.write_carloadings(batch)
         assert len(writer.list_written()) > 0
+
+    def test_batch_partitions_per_record_date_not_first_record_date(self) -> None:
+        # C1/R7: the batch used to be keyed entirely on records[0].snapshot_date,
+        # so a multi-year history fetch landed every year under the first
+        # record's date. Each record now writes to its own snapshot_date
+        # partition. (This supersedes DECISION-002, which instead keyed the whole
+        # batch on the ingestion date -- see the note in storage._write_table.)
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        batch = RailCarloadingBatch(records=[
+            RailCarloading(snapshot_date=date(2020, 1, 15), railroad="BNSF", commodity="Grain", carloads=1500),
+            RailCarloading(snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200),
+        ])
+        writer.write_carloadings(batch, dt=date(2026, 7, 15))
+
+        written = sorted(str(p) for p in self._test_dir.rglob("rail_carloadings.parquet"))
+        assert len(written) == 2
+        assert "year=2020" in written[0] and "month=01" in written[0]
+        assert "year=2021" in written[1] and "month=06" in written[1]
+        # dt must not override a record that carries its own snapshot_date
+        assert not any("year=2026" in p for p in written)
+
+    def test_unknown_table_raises(self) -> None:
+        # I4: an unknown table used to write a 0-row parquet while logging
+        # success -- now it fails loudly.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        batch = RailCarloadingBatch(records=[
+            RailCarloading(snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500),
+        ])
+        with pytest.raises(ValueError, match="Unknown table"):
+            writer._write_table("no_such_table", batch.records, dt=date(2026, 7, 15))

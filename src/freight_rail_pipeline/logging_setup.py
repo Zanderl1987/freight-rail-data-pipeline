@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+log = logging.getLogger(__name__)
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -20,8 +22,6 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[0]:
             log_entry["exception"] = self.formatException(record.exc_info)
-        if hasattr(record, "extra"):
-            log_entry["extra"] = record.extra
         return json.dumps(log_entry)
 
 
@@ -35,7 +35,12 @@ def setup_logging(
 
     root = logging.getLogger(logger_name or "freight_rail_pipeline")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    root.handlers.clear()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception as exc:  # pragma: no cover - close is best-effort
+            log.debug("Failed to close handler %s: %s", handler, exc)
 
     stream_handler = logging.StreamHandler(sys.stdout)
     if json_format:
