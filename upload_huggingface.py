@@ -135,7 +135,7 @@ def export_tables(output_dir: Path) -> list[tuple[str, int, int]]:
 def main(
     repo_name: str = "freight-rail-data-pipeline",
     private: bool = False,
-    owner: str = "Zanderl1987",
+    owner: str = "ZanderL1337",
 ) -> None:
     token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
