@@ -32,6 +32,14 @@ log = logging.getLogger(__name__)
 RAW_DATA_PAGE = "https://www.bts.gov/topics/transborder-raw-data"
 ZIP_RE = re.compile(r'href="(/sites/bts\.dot\.gov/files/transborder-raw/\d{4}/[^"]+\.zip)"', re.I)
 
+# The modern-schema annual zips (2007-2017) carry one CSV per view per month
+# named like `dot1_0113.csv` (dot=view, then MMYY), alongside cumulative
+# `dotX_ytd_MMYY.csv` views and (in some years) a full-year `dotX_YYYY.csv` --
+# the latter two never match this pattern because their segment after `dotX_`
+# is not a valid 2-digit month. Some years also bundle redundant copies
+# (e.g. 2008's "Copy of January 2008"), which collapse to one basename.
+MONTHLY_DOT_CSV_RE = re.compile(r"^dot([123])_(0[1-9]|1[0-2])(\d{2})\.csv$", re.I)
+
 _MONTH_NAMES = [
     "january",
     "february",
@@ -74,6 +82,26 @@ def _is_retryable_transborder(exc: BaseException) -> bool:
     if isinstance(exc, (requests.RequestException, TimeoutError, ConnectionError)):
         return True
     return isinstance(status, int) and (status == 403 or status == 429 or status >= 500)
+
+
+def select_monthly_dot_files(member_names: list[str]) -> dict[tuple[int, int], list[str]]:
+    """Map a modern-schema annual zip's members to per-month dot1/dot2/dot3 CSVs.
+
+    Returns {(year, month): [member names]} for the monthly raw-grain files
+    (e.g. `2008/January 2008/dot1_0108.csv`). Cumulative `dotX_ytd_MMYY.csv`,
+    full-year `dotX_YYYY.csv`, and non-data members never match MONTHLY_DOT_CSV_RE.
+    Redundant copies of a month (same basename in a different folder, as in
+    2008's "Copy of January 2008") collapse to one member -- the shortest path
+    wins so the copy is dropped, not the real one.
+    """
+    by_month: dict[tuple[int, int], dict[str, str]] = {}
+    for name in sorted(member_names, key=lambda n: (len(n), n)):
+        match = MONTHLY_DOT_CSV_RE.match(name.rsplit("/", 1)[-1])
+        if not match:
+            continue
+        key = (2000 + int(match.group(3)), int(match.group(2)))
+        by_month.setdefault(key, {}).setdefault(match.group(1).lower(), name)
+    return {key: list(names.values()) for key, names in sorted(by_month.items())}
 
 
 class BTSTransBorderSource(BaseSource):
@@ -213,12 +241,27 @@ class BTSTransBorderSource(BaseSource):
                 continue
             with zf.open(name) as f:
                 text = io.TextIOWrapper(f, encoding="utf-8-sig", newline="")
-                base = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                file_tag = base.split("_", 1)[0]
-                for row in csv.DictReader(text):
-                    record = self._normalizer.normalize_transborder_freight(
-                        dict(row), source_file=file_tag
-                    )
-                    if record is not None:
-                        records.append(record)
+                records.extend(self._parse_csv_member(name, text))
+        return records
+
+    def _parse_csv_member(
+        self, name: str, text: io.TextIOBase
+    ) -> list[TransBorderFreight]:
+        """Parse one TransBorder CSV (dot1/dot2/dot3) into normalized records.
+
+        Shared by the live monthly fetch (an in-memory zip member) and the
+        historical annual backfill (members of 2007-2017 zip bundles that carry
+        the same modern schema). `text` must be an open text stream decoded with
+        the member's encoding; the source_file tag is derived from the member
+        basename (the `dotN` prefix) exactly as the monthly fetch does.
+        """
+        base = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        file_tag = base.split("_", 1)[0]
+        records: list[TransBorderFreight] = []
+        for row in csv.DictReader(text):
+            record = self._normalizer.normalize_transborder_freight(
+                dict(row), source_file=file_tag
+            )
+            if record is not None:
+                records.append(record)
         return records

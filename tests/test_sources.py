@@ -18,7 +18,10 @@ from freight_rail_pipeline.sources.aar_weekly import (
     parse_aar_page,
 )
 from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
-from freight_rail_pipeline.sources.bts_transborder import BTSTransBorderSource
+from freight_rail_pipeline.sources.bts_transborder import (
+    BTSTransBorderSource,
+    select_monthly_dot_files,
+)
 from freight_rail_pipeline.sources.eurostat_rail import DATASET_ID, EurostatRailSource
 from freight_rail_pipeline.sources.fmcsa_carrier_census import (
     SELECT_COLUMNS,
@@ -999,6 +1002,68 @@ class TestBTSTransBorderSource:
         result = source.fetch()
         assert result.success is False
         assert result.error is not None
+
+    def test_select_monthly_dot_files(self) -> None:
+        # Folder layout (2008) with a redundant "Copy of January 2008" bundle
+        # and capitalized March files; ytd views and a backup dump must be ignored.
+        members = [
+            "2008/January 2008/dot1_0108.csv",
+            "2008/January 2008/dot2_0108.csv",
+            "2008/January 2008/dot3_0108.csv",
+            "2008/January 2008/dot1_ytd_0108.csv",
+            "2008/Copy of January 2008/dot1_0108.csv",
+            "2008/Copy of January 2008/dot2_0108.csv",
+            "2008/March 2008/Dot1_0308.csv",
+            "2008/March 2008/Dot2_0308.csv",
+            "2008/December 2008/dot1_1208.csv",
+            "2008/December 2008/dot1_2008.csv",  # full-year file: not a month
+            "2008/TBDR_DB_Backup092008/natfd.csv",
+        ]
+        selected = select_monthly_dot_files(members)
+        assert (2008, 1) in selected
+        assert (2008, 3) in selected
+        assert (2008, 12) in selected
+        # Copy-of-January collapses to one member per view, the shorter path.
+        assert sorted(n.rsplit("/", 1)[-1] for n in selected[(2008, 1)]) == [
+            "dot1_0108.csv",
+            "dot2_0108.csv",
+            "dot3_0108.csv",
+        ]
+        assert all("Copy of" not in n for n in selected[(2008, 1)])
+        # ytd / annual / junk never selected.
+        assert all("_ytd_" not in n for n in sum(selected.values(), []))
+        assert all(not n.lower().endswith("_2008.csv") for n in sum(selected.values(), []))
+
+    def test_select_monthly_dot_files_zips_and_flat(self) -> None:
+        zips = ["2017/Jan. 2017.zip", "2017/Feb. 2017.zip"]
+        assert select_monthly_dot_files(zips) == {}
+        flat = [
+            "Revised 2011 Public Data/Data Files/dot1_0111.csv",
+            "Revised 2011 Public Data/Data Files/dot1_0211.csv",
+            "Revised 2011 Public Data/Data Files/dot3_2011.csv",
+        ]
+        selected = select_monthly_dot_files(flat)
+        assert selected == {
+            (2011, 1): ["Revised 2011 Public Data/Data Files/dot1_0111.csv"],
+            (2011, 2): ["Revised 2011 Public Data/Data Files/dot1_0211.csv"],
+        }
+
+    @responses.activate
+    def test_parse_csv_member(self, source: BTSTransBorderSource) -> None:
+        text = (
+            "TRDTYPE,USASTATE,DEPE,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,"
+            "FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR\n"
+            "1,AK,0901,5,,XY,1220,42199,0,62,1,1,01,2007\n"
+            "2,WA,0604,6,,,2010,88100,1200,900,2,0,01,2007\n"
+        )
+        records = source._parse_csv_member("2007/January 2007/dot1_0107.csv", io.StringIO(text))
+        assert len(records) == 2
+        assert all(r.source_file == "dot1" for r in records)
+        assert all(r.snapshot_date == date(2007, 1, 31) for r in records)
+        assert records[0].trade_type == "import"
+        assert records[0].mode == "truck"
+        assert records[1].trade_type == "export"
+        assert records[1].mode == "rail"
 
 
 class TestAARWeeklyTrafficSource:
