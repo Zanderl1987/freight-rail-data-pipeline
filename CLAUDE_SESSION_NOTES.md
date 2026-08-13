@@ -184,3 +184,23 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   2026-08-12 session added 3 new tables (`waybill_shipments` 2.17M, `transborder_freight`
   127k, `aar_weekly_traffic` 52) — **the HF dataset is behind the local store by several
   runs.** Re-run `upload_huggingface.py` next time HF freshness matters.
+
+---
+
+## Session 2026-08-12 (backfill, `d56f546`)
+
+- **HF re-synced 2026-08-12: 10 tables / 24,580,481 rows / 558.95 MB** (was 7 / 4.3M / 144.7MB).
+- **STB waybill full backfill**: `waybill_shipments` now covers waybill years **1996–2024,
+  20,113,513 rows / 422MB** (~2.1M rows/year for 2021–2024; 2014 thin — no 2014 sample).
+  All sample years 2000–2024 fetched (`scripts/backfill_stb_waybill.py`).
+- **Three code changes** (commit `d56f546`):
+  1. `storage._write_table` merges year partitions with existing data across runs (was:
+     silent overwrite — backfilling would have deleted earlier samples' rows) + dedup on
+     record identity. 2 new tests.
+  2. `STBWaybillSource.force` bypasses the partition-existence skip for backfill runs (a
+     newer sample's few rows in `year=YYYY` don't mean sample YYYY was fetched).
+  3. `_parse_sample` accepts `.txt/.dat/.asc` members — 2001–2003/2005 ship `PU{YYYY}.DAT`,
+     2000 ships three `.asc` subsample files — and raises a clear error instead of an empty
+     StopIteration message. All legacy members are 247-byte Table 4-6 records.
+- **Remaining**: TransBorder historical backfill (only June 2026 live); key signups (FRED,
+  BLS, EIA, Census, UN Comtrade) + Freightos for key-gated builds.
