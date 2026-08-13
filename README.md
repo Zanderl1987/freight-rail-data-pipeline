@@ -1,8 +1,36 @@
 # Freight Rail Data Pipeline
 
+![CI](https://github.com/Zanderl1987/freight-rail-data-pipeline/actions/workflows/test.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 Multi-source data pipeline that ingests, normalizes, and stores freight rail and
 ocean container shipping data. Outputs Parquet and CSV files suitable for
 datalake ingestion (Iceberg-compatible schema design).
+
+Ten public sources, each with its own idea of what a date is, what a region is, and
+how often anything updates, land in one normalized store you can actually join across.
+
+## What's in the store
+
+Current local build, 51 million rows across 10 tables:
+
+| Table | Rows | What it is |
+|---|---:|---|
+| `transborder_freight` | 27,015,354 | US–Canada/Mexico freight value and weight by mode, state, port, commodity |
+| `waybill_shipments` | 20,113,513 | Origin-destination rail commodity flows (STB stratified sample) |
+| `motor_carrier_census` | 2,085,534 | Motor carrier registrations, the universe table |
+| `rail_service_metrics` | 1,553,679 | Speed, dwell, and cars-on-line by railroad |
+| `rail_safety_incidents` | 952,160 | FRA accident and incident reports |
+| `rail_carloadings` | 199,286 | Carloads by railroad and commodity |
+| `freight_indicators` | 25,632 | Truck spot rates, intermodal, ocean container rates |
+| `rail_tariff_rates` | 6,802 | Published tariff rates by lane and commodity |
+| `rail_eurostat_freight` | 1,329 | EU rail goods transported, 37 countries |
+| `aar_weekly_traffic` | 52 | Weekly carloads and intermodal, parsed from press-release PDFs |
+
+The AAR table is forward-only: the source is a weekly PDF press release with no
+archive, so history exists only from the point the pipeline started collecting it.
+That constraint is the reason the table is small, not a bug.
 
 ## Data Sources
 
@@ -84,6 +112,16 @@ src/freight_rail_pipeline/
     └── dashboard.py      # Streamlit app
 ```
 
+## Testing
+
+```bash
+pytest
+```
+
+140 tests at 76% line coverage, run on every push and pull request via GitHub Actions.
+Source adapters are tested against recorded fixtures, including the AAR press-release
+PDF, so a parser regression shows up in CI rather than as a quietly malformed table.
+
 ## Design Decisions (pending Infrastructure Plan)
 
 See [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) for a log of architectural decisions
@@ -93,4 +131,4 @@ and financial data pipeline.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
