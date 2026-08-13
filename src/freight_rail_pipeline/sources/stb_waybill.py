@@ -92,6 +92,12 @@ class STBWaybillSource(BaseSource):
         super().__init__(config)
         self.base_url = "https://www.stb.gov/wp-content/uploads"
         self._normalizer = DataNormalizer()
+        # Backfill runs bypass the "partition already written" skip: a year=YYYY
+        # partition can exist with data from a NEWER sample (e.g. the 2024 sample
+        # writes a few rows to 2018-2023) even though the YYYY sample itself was
+        # never fetched -- and that sample is what holds the ~2M rows for its own
+        # waybill year.
+        self.force = False
 
     @property
     def name(self) -> str:
@@ -128,7 +134,7 @@ class STBWaybillSource(BaseSource):
                 error=f"No STB waybill sample zip found for year {ref_year} or earlier",
             )
 
-        if self._waybill_year_written(year):
+        if not self.force and self._waybill_year_written(year):
             self.log.info("STB waybill sample %d already written; skipping", year)
             return SourceResult(
                 records=[],
@@ -194,16 +200,29 @@ class STBWaybillSource(BaseSource):
             records: list[WaybillShipment] = []
             dropped = 0
             with zipfile.ZipFile(tmp_path) as zf:
-                txt_name = next(n for n in zf.namelist() if n.lower().endswith(".txt"))
-                with zf.open(txt_name) as f:
-                    for line in f:
-                        row = line.rstrip(b"\r\n")
-                        if len(row) < RECORD_WIDTH:
-                            dropped += 1
-                            continue
-                        record = self._parse_record(row, year)
-                        if record is not None:
-                            records.append(record)
+                # The 247-byte Table 4-6 layout goes back to 2000, but the
+                # member name/extension varies by release: modern samples ship
+                # a .txt, 2001-2003/2005 ship PU{YYYY}.DAT, and 2000 ships three
+                # .asc subsample files (parse them all -- they are distinct
+                # draws, not copies).
+                data_names = [
+                    n for n in zf.namelist()
+                    if n.lower().endswith((".txt", ".dat", ".asc"))
+                ]
+                if not data_names:
+                    raise ValueError(
+                        f"No fixed-width data member (.txt/.dat/.asc) in {tmp_path.name}"
+                    )
+                for txt_name in data_names:
+                    with zf.open(txt_name) as f:
+                        for line in f:
+                            row = line.rstrip(b"\r\n")
+                            if len(row) < RECORD_WIDTH:
+                                dropped += 1
+                                continue
+                            record = self._parse_record(row, year)
+                            if record is not None:
+                                records.append(record)
             return records, dropped
         finally:
             tmp_path.unlink(missing_ok=True)

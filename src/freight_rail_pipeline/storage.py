@@ -415,9 +415,7 @@ class StorageWriter:
         # snapshot date; year partitions must MERGE every snapshot that falls in
         # the same year into one file -- otherwise each group rewrites the same
         # `year=YYYY/<table>.parquet` and only the last one survives.
-        key_fn = (
-            (lambda s: s.year) if partition == "year" else (lambda s: (s.year, s.month, s.day))
-        )
+        key_fn = (lambda s: s.year) if partition == "year" else (lambda s: (s.year, s.month, s.day))
         by_key: dict[int | tuple[int, int, int], list[BaseModel]] = {}
         for record in records:
             by_key.setdefault(key_fn(partition_date(record)), []).append(record)
@@ -448,6 +446,33 @@ class StorageWriter:
 
             df = pd.DataFrame(serialized)
 
+            file_path = partition_dir / f"{table_name}.parquet"
+
+            # Year partitions accumulate across runs: every STB sample year
+            # contributes records to overlapping waybill years, so a backfill
+            # run must MERGE with what is already on disk instead of silently
+            # replacing it -- the same overwrite hazard the within-run group
+            # merge fixed, one level up. Day partitions keep overwrite
+            # semantics (each fetch returns full history for a day) and dedup
+            # happens at export.
+            if partition == "year" and file_path.exists():
+                existing = pd.read_parquet(file_path)
+                if not existing.empty:
+                    identity_cols = [c for c in existing.columns if c != "ingested_at"]
+                    if identity_cols:
+                        df = (
+                            pd.concat([existing, df], ignore_index=True)
+                            .sort_values("ingested_at")
+                            .drop_duplicates(subset=identity_cols, keep="last")
+                            .reset_index(drop=True)
+                        )
+                    log.info(
+                        "Merged %d existing + %d new records into %s",
+                        len(existing),
+                        len(day_records),
+                        file_path,
+                    )
+
             # Ensure date-ish fields
             if "snapshot_date" in df.columns:
                 df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
@@ -458,7 +483,6 @@ class StorageWriter:
 
             # Write Parquet
             pa_table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
-            file_path = partition_dir / f"{table_name}.parquet"
             pq.write_table(pa_table, file_path, compression="zstd")  # type: ignore[no-untyped-call]
             log.info("Wrote %d records to %s", len(day_records), file_path)
             self.written_paths.append(str(file_path))

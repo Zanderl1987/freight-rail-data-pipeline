@@ -40,14 +40,19 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = RailCarloadingBatch(records=[
-            RailCarloading(
-                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500
-            ),
-            RailCarloading(
-                snapshot_date=date(2026, 7, 15), railroad="UP", commodity="Coal", carloads=3200
-            ),
-        ])
+        batch = RailCarloadingBatch(
+            records=[
+                RailCarloading(
+                    snapshot_date=date(2026, 7, 15),
+                    railroad="BNSF",
+                    commodity="Grain",
+                    carloads=1500,
+                ),
+                RailCarloading(
+                    snapshot_date=date(2026, 7, 15), railroad="UP", commodity="Coal", carloads=3200
+                ),
+            ]
+        )
 
         count = writer.write_carloadings(batch, dt=date(2026, 7, 15))
         assert count == 2
@@ -63,18 +68,20 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = OceanFreightRateBatch(records=[
-            OceanFreightRate(
-                snapshot_date=date(2026, 7, 28),
-                route_code="FBX01",
-                route_description="China → USWC",
-                origin_port="CNSHA",
-                destination_port="USLAX",
-                trade_lane="Trans-Pacific",
-                container_type="40GP",
-                rate_usd=4500,
-            ),
-        ])
+        batch = OceanFreightRateBatch(
+            records=[
+                OceanFreightRate(
+                    snapshot_date=date(2026, 7, 28),
+                    route_code="FBX01",
+                    route_description="China → USWC",
+                    origin_port="CNSHA",
+                    destination_port="USLAX",
+                    trade_lane="Trans-Pacific",
+                    container_type="40GP",
+                    rate_usd=4500,
+                ),
+            ]
+        )
 
         count = writer.write_ocean_rates(batch, dt=date(2026, 7, 28))
         assert count == 1
@@ -96,20 +103,20 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = RailCarloadingBatch(records=[
-            RailCarloading(
-                snapshot_date=date(2026, 7, 15), railroad="CSX", commodity="Chemicals", carloads=500
-            ),
-        ])
+        batch = RailCarloadingBatch(
+            records=[
+                RailCarloading(
+                    snapshot_date=date(2026, 7, 15),
+                    railroad="CSX",
+                    commodity="Chemicals",
+                    carloads=500,
+                ),
+            ]
+        )
         writer.write_carloadings(batch, dt=date(2026, 7, 15))
 
         expected_path = (
-            self._test_dir
-            / "freight"
-            / "rail_carloadings"
-            / "year=2026"
-            / "month=07"
-            / "day=15"
+            self._test_dir / "freight" / "rail_carloadings" / "year=2026" / "month=07" / "day=15"
         )
         assert expected_path.exists()
         assert (expected_path / "rail_carloadings.parquet").exists()
@@ -127,11 +134,16 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = RailCarloadingBatch(records=[
-            RailCarloading(
-                snapshot_date=date(2026, 7, 15), railroad="NS", commodity="Intermodal", carloads=800
-            ),
-        ])
+        batch = RailCarloadingBatch(
+            records=[
+                RailCarloading(
+                    snapshot_date=date(2026, 7, 15),
+                    railroad="NS",
+                    commodity="Intermodal",
+                    carloads=800,
+                ),
+            ]
+        )
         writer.write_carloadings(batch)
         assert len(writer.list_written()) > 0
 
@@ -144,14 +156,19 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = RailCarloadingBatch(records=[
-            RailCarloading(
-                snapshot_date=date(2020, 1, 15), railroad="BNSF", commodity="Grain", carloads=1500
-            ),
-            RailCarloading(
-                snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200
-            ),
-        ])
+        batch = RailCarloadingBatch(
+            records=[
+                RailCarloading(
+                    snapshot_date=date(2020, 1, 15),
+                    railroad="BNSF",
+                    commodity="Grain",
+                    carloads=1500,
+                ),
+                RailCarloading(
+                    snapshot_date=date(2021, 6, 1), railroad="UP", commodity="Coal", carloads=3200
+                ),
+            ]
+        )
         writer.write_carloadings(batch, dt=date(2026, 7, 15))
 
         written = sorted(str(p) for p in self._test_dir.rglob("rail_carloadings.parquet"))
@@ -167,11 +184,16 @@ class TestStorageWriter:
         config = PipelineConfig(output_dir=str(self._test_dir))
         writer = StorageWriter(config)
 
-        batch = RailCarloadingBatch(records=[
-            RailCarloading(
-                snapshot_date=date(2026, 7, 15), railroad="BNSF", commodity="Grain", carloads=1500
-            ),
-        ])
+        batch = RailCarloadingBatch(
+            records=[
+                RailCarloading(
+                    snapshot_date=date(2026, 7, 15),
+                    railroad="BNSF",
+                    commodity="Grain",
+                    carloads=1500,
+                ),
+            ]
+        )
         with pytest.raises(ValueError, match="Unknown table"):
             writer._write_table("no_such_table", batch.records, dt=date(2026, 7, 15))
 
@@ -193,11 +215,13 @@ class TestStorageWriter:
                 stcc=stcc,
             )
 
-        batch = WaybillShipmentBatch(records=[
-            waybill(date(2024, 1, 10), "01121"),
-            waybill(date(2024, 5, 20), "01411"),
-            waybill(date(2024, 12, 5), "01122"),
-        ])
+        batch = WaybillShipmentBatch(
+            records=[
+                waybill(date(2024, 1, 10), "01121"),
+                waybill(date(2024, 5, 20), "01411"),
+                waybill(date(2024, 12, 5), "01122"),
+            ]
+        )
         count = writer.write_waybills(batch, dt=date(2026, 7, 15))
         assert count == 3
 
@@ -209,3 +233,67 @@ class TestStorageWriter:
         assert sorted(df["stcc"]) == ["01121", "01122", "01411"]
         # no CSV fallback for the annual table
         assert not list(self._test_dir.rglob("waybill_shipments.csv"))
+
+    def test_year_partition_merges_across_runs(self) -> None:
+        # Cross-run variant of the waybill merge: a backfill run writes records
+        # for years that already exist on disk (each STB sample year overlaps
+        # prior waybill years). The writer must merge with the existing file,
+        # not overwrite it, or backfilling silently deletes earlier samples'
+        # rows.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        def waybill(dt: date, stcc: str) -> WaybillShipment:
+            return WaybillShipment(
+                snapshot_date=dt,
+                accounting_period="03/24",
+                carloads=1,
+                stcc=stcc,
+            )
+
+        first = WaybillShipmentBatch(
+            records=[
+                waybill(date(2024, 1, 10), "01121"),
+                waybill(date(2024, 5, 20), "01411"),
+            ]
+        )
+        assert writer.write_waybills(first, dt=date(2026, 7, 15)) == 2
+
+        # Second "run" (a different sample year's backfill) also has 2024 rows.
+        second = WaybillShipmentBatch(
+            records=[
+                waybill(date(2024, 3, 15), "01122"),
+                waybill(date(2024, 12, 5), "01221"),
+            ]
+        )
+        assert writer.write_waybills(second, dt=date(2026, 7, 16)) == 2
+
+        files = list(self._test_dir.rglob("waybill_shipments.parquet"))
+        assert len(files) == 1, "one merged file per year partition"
+        df = pd.read_parquet(files[0])
+        assert len(df) == 4, "second run merged into the existing file, not replaced it"
+        assert sorted(df["stcc"]) == ["01121", "01122", "01221", "01411"]
+
+    def test_year_partition_merge_dedups_duplicate_records(self) -> None:
+        # A record re-fetched across runs (same identity, newer ingested_at)
+        # must not double-count after the merge.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        def waybill(dt: date, stcc: str) -> WaybillShipment:
+            return WaybillShipment(
+                snapshot_date=dt,
+                accounting_period="03/24",
+                carloads=1,
+                stcc=stcc,
+            )
+
+        first = WaybillShipmentBatch(records=[waybill(date(2024, 4, 10), "01121")])
+        assert writer.write_waybills(first, dt=date(2026, 7, 15)) == 1
+
+        # Same record re-fetched with a newer ingest timestamp.
+        dup = WaybillShipmentBatch(records=[waybill(date(2024, 4, 10), "01121")])
+        assert writer.write_waybills(dup, dt=date(2026, 7, 16)) == 1
+
+        df = pd.read_parquet(list(self._test_dir.rglob("waybill_shipments.parquet"))[0])
+        assert len(df) == 1, "re-fetched record deduped to a single row"
