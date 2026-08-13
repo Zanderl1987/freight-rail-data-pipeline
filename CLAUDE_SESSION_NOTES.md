@@ -203,7 +203,7 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
 
 ---
 
-## Session 2026-08-12 (TransBorder modern backfill + HF re-sync, `4b753cf`)
+## Session 2026-08-12 (TransBorder modern backfill + HF re-sync, `aa196c6`)
 
 - **TransBorder modern-era backfill (R8.6)**: `transborder_freight` = **12,339,004 rows / 331MB,
   all 102 months Jan 2018–Jun 2026** (was June 2026 only). `scripts/backfill_bts_transborder.py`.
