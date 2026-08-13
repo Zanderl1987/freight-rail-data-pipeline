@@ -198,9 +198,23 @@ class BTSTransBorderSource(BaseSource):
         for name in sorted(zf.namelist()):
             if not name.lower().endswith(".csv"):
                 continue
+            # Some 2018-2020 zips were built on macOS and carry AppleDouble
+            # resource-fork junk (__MACOSX/._dot1_0720.csv): binary files whose
+            # name still ends in .csv. Skip them.
+            if name.startswith("__MACOSX/") or "/._" in name or name.startswith("._"):
+                continue
+            # 2018-2025 zips also carry cumulative YTD views
+            # (dot1_ytd_0119.csv): derivable sums of the monthly rows that would
+            # otherwise mix with the monthly grain under the same source_file
+            # tag (and duplicate January exactly). Skip them -- the monthly
+            # dot1/dot2/dot3 are the raw grain, matching 2026+ zips which ship
+            # only those.
+            if "_ytd_" in name.lower():
+                continue
             with zf.open(name) as f:
                 text = io.TextIOWrapper(f, encoding="utf-8-sig", newline="")
-                file_tag = name.rsplit(".", 1)[0].split("_", 1)[0]
+                base = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                file_tag = base.split("_", 1)[0]
                 for row in csv.DictReader(text):
                     record = self._normalizer.normalize_transborder_freight(
                         dict(row), source_file=file_tag

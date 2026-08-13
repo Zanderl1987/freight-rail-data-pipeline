@@ -23,7 +23,7 @@ Verdict key:
 | **STB Rail Service Data** | Bulk download + AgTransport Socrata (`axkm-yjzy`) | Yes | Oct 2014+ | Weekly | **GO** |
 | **STB Waybill PUF** | Annual Public Use File (fixed-width zip) | Yes (PUF); full sample gated | Annual files (backdated records inside) | Annual | **GO** (built 2026-08-12) |
 | **BTS Freight Indicators** | data.bts.gov Socrata | Yes | Varies by series (some to ~1990s) | Monthly / weekly | **GO** |
-| **BTS TransBorder Freight** | Monthly raw-data zips on bts.gov | Yes | 1994+ (zip naming varies) | Monthly | **GO** (built 2026-08-12) |
+| **BTS TransBorder Freight** | Monthly raw-data zips on bts.gov | Yes | 2018–2026 backfilled (12.34M rows); 1993–2017 annuals pending format work | Monthly | **GO** (built + backfilled 2026-08-12) |
 | **BTS FAF6** | `faf.ornl.gov/faf6` tabulation tool + bulk | Yes | 2012–2050 (estimates/forecast) | Periodic | **GO** |
 | **AAR weekly rail traffic** | Weekly press-release PDFs (RSS → release → PDF) | Yes (PDF); full history gated | Forward-only (feed holds current week) | Weekly | **GO** (built 2026-08-12, forward-only) |
 | **FRA Safety Data** | data.transportation.gov Socrata + OData/ArcGIS APIs | Yes | Decades (accidents to 1975+) | Monthly | **GO** |
@@ -84,7 +84,8 @@ Verdict key:
 - Data: monthly truck/rail/pipeline/air/vessel freight value and weight across US borders (NAFTA + all partners).
 - Access: public zips, no key. **Verified live 2026-08-12**: 403s from Akamai are pacing (3s between requests) + `Referer: https://www.bts.gov/`; `Content-Type: text/html` responses are retryable errors. The three CSVs are distinct overlapping views (dot1 = state+port, dot2 = state+commodity, dot3 = port+commodity); rows are tagged `source_file` so overlaps can be deduped at query time. `COUNTRY` holds Census numeric codes (1220→CA, 2010→MX); `CONTCODE` 1 = containerized; `DISAGMOT` is the transport mode code.
 - **Built 2026-08-12**: `sources/bts_transborder.py`, storage table `transborder_freight` (per-day partition, includes `source_file`). June 2026 pull: 126,985 rows, ~$471B.
-- Backfill: 1994+ (zip naming varies by year — expect per-year format probing).
+- **Backfilled 2026-08-12 (R8.6)**: `scripts/backfill_bts_transborder.py` walks the month-named page links → **12,339,004 rows, all 102 months Jan 2018–Jun 2026** (331MB). Parser skips cumulative `dot*_ytd_*` views (2018–2025 zips carry them alongside the monthly dot1/dot2/dot3; they are derivable sums that would otherwise mix with the monthly grain under the same `source_file` tag — 2026+ zips ship only monthly) and `__MACOSX/._` AppleDouble junk (macOS-built zips have binary resource-fork members whose names still end in `.csv`). The `source_file` tag strips the member's folder prefix (`Jan. 2018/dot1_0118.csv` → `dot1`).
+- Backfill quirks: 2021 ships only 8 files — the missing months live in a combined `July-to-Dec-2021.zip` (parsed fine since rows carry their own `snapshot_date`); monthly 2018–2020 zips can be folder-nested. The 1993–2017 **annual** zips have no month in the filename (skipped by `_list_zip_links`) and are a different beast: zip-of-zips (2017 = 12 nested monthly zips; 1993 = `93MM.zip` legacy month files) in old column formats — **backfill NOT started, needs per-era column mapping**.
 - Verdict: **GO** via the bts.gov raw-data zips. The Socrata story `kijm-95mr` remains non-tabular (403 on the query API); `crem-w557` is unrelated.
 
 **FAF6 — Freight Analysis Framework**

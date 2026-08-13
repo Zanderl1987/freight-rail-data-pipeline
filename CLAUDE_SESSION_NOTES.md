@@ -178,12 +178,8 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   Census Intl Trade, UN Comtrade, FMC quarterly XLSX — see `US_DOMESTIC_FREIGHT_SOURCES.md`
   for the full source-vetting backlog with GO/NO-GO calls per source. (Built 2026-08-12:
   STB Waybill PUF, BTS TransBorder, AAR weekly — all three keyless.)
-- **HuggingFace sync**: last synced 2026-08-09 (7 tables / 4,345,102 rows / 144.73 MB,
-  includes `rail_eurostat_freight`). The PR #1 merge brings in the motor-carrier-census
-  table, the 2026-08-10 refresh updated all 7 tables (now 4,348,342 records), and the
-  2026-08-12 session added 3 new tables (`waybill_shipments` 2.17M, `transborder_freight`
-  127k, `aar_weekly_traffic` 52) — **the HF dataset is behind the local store by several
-  runs.** Re-run `upload_huggingface.py` next time HF freshness matters.
+- **HuggingFace sync**: last synced 2026-08-12 (10 tables / 36,792,500 rows / 871.6 MB,
+  includes the 3 R8 tables, the full waybill backfill, and the TransBorder backfill).
 
 ---
 
@@ -202,5 +198,24 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   3. `_parse_sample` accepts `.txt/.dat/.asc` members — 2001–2003/2005 ship `PU{YYYY}.DAT`,
      2000 ships three `.asc` subsample files — and raises a clear error instead of an empty
      StopIteration message. All legacy members are 247-byte Table 4-6 records.
-- **Remaining**: TransBorder historical backfill (only June 2026 live); key signups (FRED,
+- **Remaining**: TransBorder *legacy* backfill 1993–2017 (annual zip-of-zips in old formats); key signups (FRED,
   BLS, EIA, Census, UN Comtrade) + Freightos for key-gated builds.
+
+---
+
+## Session 2026-08-12 (TransBorder modern backfill + HF re-sync, `4b753cf`)
+
+- **TransBorder modern-era backfill (R8.6)**: `transborder_freight` = **12,339,004 rows / 331MB,
+  all 102 months Jan 2018–Jun 2026** (was June 2026 only). `scripts/backfill_bts_transborder.py`.
+- **Three parser fixes** (commit `d56f546` touched `bts_transborder.py`):
+  1. Skip cumulative `dot*_ytd_*` views — 2018–2025 zips carry them alongside the monthly
+     dot1/dot2/dot3 and they would mix with the monthly grain under the same `source_file` tag
+     (and duplicate January exactly). 2026+ zips ship only the monthly views.
+  2. Skip `__MACOSX/._` AppleDouble members (macOS-built zips; 2020-07 failed with a utf-8 error).
+  3. `source_file` tag strips the member folder prefix (`April2024/dot2_0424.csv` → `dot2`) —
+     was leaking folders as 183 distinct dirty tags. Table wiped and re-fetched clean.
+- **2021 quirk**: only 8 files on the page; Aug–Dec live in a combined `July-to-Dec-2021.zip`
+  (rows carry their own `snapshot_date`, so the same parser splits them correctly).
+- **1993–2017 annuals probed, NOT started**: zip-of-zips (2017 = 12 nested monthly zips;
+  1993 = `93MM.zip` legacy month-code zips) in per-era column formats — needs a mapping effort.
+- **HF re-synced: 10 tables / 36,792,500 rows / 871.6 MB** (transborder 12,339,004; waybill 20,105,108).
