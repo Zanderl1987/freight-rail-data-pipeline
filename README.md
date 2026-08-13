@@ -15,7 +15,9 @@ datalake ingestion (Iceberg-compatible schema design).
 | **FMCSA Carrier Census** | Motor carrier registrations (universe table) | Public API (free, no key) | ~Annual |
 | **Eurostat rail freight** | EU rail goods transported (tonnes + tonne-km, 37 countries) | Public JSON-stat API (free, no key) | Annual (2004+) |
 | **FRED (Cass + Truck Tonnage)** | Cass Freight Index (shipments/expenditures), ATA Truck Tonnage Index | Free API (requires `FRED_API_KEY`) | Monthly |
-| **STB Waybill** (planned) | Origin-destination commodity flows by rail | Public Use File (annual CSV) | Annual |
+| **STB Waybill PUF** | Origin-destination commodity flows by rail (annual stratified sample, fixed-width) | Public Use File zip (free, no key) | Annual |
+| **BTS TransBorder Freight** | US–Canada/Mexico freight value/weight by mode, state, port, commodity | Monthly raw-data zips (free, no key) | Monthly |
+| **AAR Weekly Rail Traffic** | US/Canada/Mexico weekly carloads + intermodal by commodity, YoY | Weekly press-release PDF (free, no key) | Weekly (forward-only) |
 | **BTS Freight Analysis Framework** (planned) | Multimodal freight tonnage/value forecasts | CSV downloads | Periodic |
 | **Census Intl Trade / UN Comtrade / EIA / BLS** (planned) | Trade by port/mode, energy, PPI | Free APIs (key signups TODO) | Monthly |
 
@@ -28,8 +30,10 @@ FRA Safety ───────┤
 FMCSA Census ─────┼──► Normalizer ──► Storage ──► Parquet/CSV
 Eurostat ─────────┤       │
 FRED ─────────────┤       └──► Reporting
-Freightos FBX ────┘            ├── CLI (click + rich)
-                               └── Streamlit dashboard
+Freightos FBX ────┤            ├── CLI (click + rich)
+STB Waybill ──────┤            └── Streamlit dashboard
+BTS TransBorder ──┤
+AAR weekly ───────┘
 ```
 
 ## Quick Start
@@ -68,7 +72,10 @@ src/freight_rail_pipeline/
 │   ├── fra_safety.py
 │   ├── fmcsa_carrier_census.py
 │   ├── eurostat_rail.py
-│   └── fred.py
+│   ├── fred.py
+│   ├── stb_waybill.py
+│   ├── bts_transborder.py
+│   └── aar_weekly.py
 ├── models/
 │   ├── schemas.py       # Pydantic data models
 │   └── normalizer.py    # Raw-to-canonical transformation

@@ -35,6 +35,7 @@ dependencies = [
     "plotly>=5.18",
     "httpx>=0.26",
     "tenacity>=8.2",
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]

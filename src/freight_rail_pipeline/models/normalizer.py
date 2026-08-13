@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .schemas import (
+    AARWeeklyTraffic,
     EurostatRailFreight,
     FreightIndicator,
     MotorCarrierCensus,
@@ -14,7 +15,28 @@ from .schemas import (
     RailSafetyIncident,
     RailServiceMetric,
     RailTariffRate,
+    TransBorderFreight,
+    WaybillShipment,
 )
+
+# BTS TransBorder raw DISAGMOT -> mode label (see TransBorder Freight Data
+# Program Documentation, "DISAGMOT - Mode of transportation").
+DISAGMOT_LABELS: dict[str, str] = {
+    "1": "vessel",
+    "3": "air",
+    "4": "mail",
+    "5": "truck",
+    "6": "rail",
+    "7": "pipeline",
+    "8": "other",
+    "9": "foreign_trade_zone",
+}
+
+# The raw COUNTRY field uses Census numeric country codes, not ISO codes.
+COUNTRY_CODE_MAP: dict[str, str] = {
+    "1220": "CA",
+    "2010": "MX",
+}
 
 log = logging.getLogger(__name__)
 
@@ -395,6 +417,252 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize motor carrier census record: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def _parse_waybill_date(value: Any, reference_year: int) -> date | None:
+        """Parse the PUF's 6-digit 'mmddyy' date, resolving the century against
+        the sample's reference year (waybills in an annual sample often predate
+        the sample year by a few years)."""
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            mm, dd, yy = int(value[0:2]), int(value[2:4]), int(value[4:6])
+        except ValueError:
+            return None
+        candidates = [
+            (abs(2000 + yy - reference_year), 2000 + yy),
+            (abs(1900 + yy - reference_year), 1900 + yy),
+        ]
+        year = min(candidates, key=lambda c: c[0])[1]
+        try:
+            return date(year, mm, dd)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def normalize_waybill_shipment(
+        raw: dict[str, Any], reference_year: int
+    ) -> WaybillShipment | None:
+        """`raw` is a dict of fields sliced from one 247-byte PUF record (values
+        still strings, names matching the reference-guide layout). Weights are
+        short tons; revenue/charges are dollars."""
+        try:
+            carloads = DataNormalizer._safe_int(raw.get("carloads"))
+            stcc = raw.get("stcc")
+            if carloads is None or not stcc:
+                return None
+
+            record_date = DataNormalizer._parse_waybill_date(
+                raw.get("waybill_date"), reference_year
+            )
+            if record_date is None:
+                return None
+
+            period = raw.get("accounting_period") or ""
+            if len(period) == 4:
+                accounting_period = f"{period[0:2]}/{period[2:4]}"
+            else:
+                accounting_period = period
+
+            interchanges = [
+                str(raw.get(f"interchange_state_{i}") or "").strip()
+                for i in range(1, 10)
+            ]
+            interchange_states = ",".join(s for s in interchanges if s) or None
+
+            return WaybillShipment(
+                snapshot_date=record_date,
+                accounting_period=accounting_period,
+                carloads=carloads,
+                car_ownership=str(raw.get("car_ownership") or "").strip() or None,
+                aar_equipment_type=str(raw.get("aar_equipment_type") or "").strip() or None,
+                aar_mechanical_designation=str(
+                    raw.get("aar_mechanical_designation") or ""
+                ).strip()
+                or None,
+                stb_car_type=str(raw.get("stb_car_type") or "").strip() or None,
+                tofc_cofc_service_code=str(raw.get("tofc_cofc_service_code") or "").strip()
+                or None,
+                tofc_cofc_units=DataNormalizer._safe_int(raw.get("tofc_cofc_units")),
+                tcu_ownership=str(raw.get("tcu_ownership") or "").strip() or None,
+                tcu_type=str(raw.get("tcu_type") or "").strip() or None,
+                hazardous_boxcar_flag=str(raw.get("hazardous_boxcar_flag") or "").strip()
+                or None,
+                stcc=stcc.strip(),
+                billed_tons=DataNormalizer._safe_float(raw.get("billed_tons")),
+                actual_tons=DataNormalizer._safe_float(raw.get("actual_tons")),
+                freight_revenue=DataNormalizer._safe_float(raw.get("freight_revenue")),
+                transit_charges=DataNormalizer._safe_float(raw.get("transit_charges")),
+                miscellaneous_charges=DataNormalizer._safe_float(
+                    raw.get("miscellaneous_charges")
+                ),
+                inter_intra_state_code=str(raw.get("inter_intra_state_code") or "").strip()
+                or None,
+                type_of_move=str(raw.get("type_of_move") or "").strip() or None,
+                all_rail_intermodal_code=str(raw.get("all_rail_intermodal_code") or "").strip()
+                or None,
+                type_of_move_via_water=str(raw.get("type_of_move_via_water") or "").strip()
+                or None,
+                transit_code=str(raw.get("transit_code") or "").strip() or None,
+                substituted_truck_for_rail=str(
+                    raw.get("substituted_truck_for_rail") or ""
+                ).strip()
+                or None,
+                rebill_code=str(raw.get("rebill_code") or "").strip() or None,
+                estimated_shortline_miles=DataNormalizer._safe_int(
+                    raw.get("estimated_shortline_miles")
+                ),
+                stratum_id=DataNormalizer._safe_int(raw.get("stratum_id")),
+                subsample_id=DataNormalizer._safe_int(raw.get("subsample_id")),
+                exact_expansion_factor=DataNormalizer._safe_float(
+                    raw.get("exact_expansion_factor")
+                ),
+                theoretical_expansion_factor=DataNormalizer._safe_int(
+                    raw.get("theoretical_expansion_factor")
+                ),
+                num_interchanges=DataNormalizer._safe_int(raw.get("num_interchanges")),
+                origin_bea_area=DataNormalizer._safe_int(raw.get("origin_bea_area")),
+                origin_freight_territory=str(raw.get("origin_freight_territory") or "").strip()
+                or None,
+                interchange_states=interchange_states,
+                termination_bea_area=DataNormalizer._safe_int(raw.get("termination_bea_area")),
+                termination_freight_territory=str(
+                    raw.get("termination_freight_territory") or ""
+                ).strip()
+                or None,
+                reporting_period_length=str(raw.get("reporting_period_length") or "").strip()
+                or None,
+                car_capacity=DataNormalizer._safe_int(raw.get("car_capacity")),
+                nominal_car_capacity=DataNormalizer._safe_int(raw.get("nominal_car_capacity")),
+                tare_weight=DataNormalizer._safe_int(raw.get("tare_weight")),
+                outside_length=DataNormalizer._safe_int(raw.get("outside_length")),
+                outside_width=DataNormalizer._safe_int(raw.get("outside_width")),
+                outside_height=DataNormalizer._safe_int(raw.get("outside_height")),
+                extreme_outside_height=DataNormalizer._safe_int(
+                    raw.get("extreme_outside_height")
+                ),
+                wheel_bearings_type=str(raw.get("wheel_bearings_type") or "").strip() or None,
+                num_axles=DataNormalizer._safe_int(raw.get("num_axles")),
+                draft_gear=str(raw.get("draft_gear") or "").strip() or None,
+                num_articulated_units=DataNormalizer._safe_int(
+                    raw.get("num_articulated_units")
+                ),
+                aar_error_codes=str(raw.get("aar_error_codes") or "").strip() or None,
+                routing_error_flag=str(raw.get("routing_error_flag") or "").strip() or None,
+                expanded_carloads=DataNormalizer._safe_int(raw.get("expanded_carloads")),
+                expanded_tons=DataNormalizer._safe_int(raw.get("expanded_tons")),
+                expanded_freight_revenue=DataNormalizer._safe_float(
+                    raw.get("expanded_freight_revenue")
+                ),
+                expanded_trailer_container_count=DataNormalizer._safe_int(
+                    raw.get("expanded_trailer_container_count")
+                ),
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize waybill shipment: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def normalize_transborder_freight(
+        raw: dict[str, Any], source_file: str | None = None
+    ) -> TransBorderFreight | None:
+        """`raw` is one CSV row (DictReader) from a BTS TransBorder monthly zip
+        (dot1/dot2/dot3). VALUE and COUNTRY are required; everything else falls
+        back to None/blank-tolerant handling. `source_file` tags which of the
+        three overlapping views the row came from."""
+        try:
+            trade = raw.get("TRDTYPE")
+            country = raw.get("COUNTRY")
+            value = DataNormalizer._safe_float(raw.get("VALUE"))
+            month = DataNormalizer._safe_int(raw.get("MONTH"))
+            year = DataNormalizer._safe_int(raw.get("YEAR"))
+            if trade is None or not country or value is None or month is None or year is None:
+                return None
+
+            import calendar
+
+            snapshot_date = date(year, month, calendar.monthrange(year, month)[1])
+
+            country_code = COUNTRY_CODE_MAP.get(str(country).strip(), str(country).strip())
+            disagg = str(raw.get("DISAGMOT") or "").strip()
+            container = str(raw.get("CONTCODE") or "").strip()
+            containerized = container == "1"
+
+            df = str(raw.get("DF") or "").strip() or None
+
+            return TransBorderFreight(
+                snapshot_date=snapshot_date,
+                trade_type="import" if trade == "1" else "export",
+                country=country_code,
+                year=year,
+                month=month,
+                mode=DISAGMOT_LABELS.get(disagg, "unknown"),
+                disagg_mode=DataNormalizer._safe_int(disagg),
+                source_file=source_file,
+                us_state=str(raw.get("USASTATE") or "").strip() or None,
+                district_port=str(raw.get("DEPE") or "").strip() or None,
+                commodity_2digit=str(raw.get("COMMODITY2") or "").strip() or None,
+                canada_province=str(raw.get("CANPROV") or "").strip() or None,
+                mexico_state=str(raw.get("MEXSTATE") or "").strip() or None,
+                value_usd=value,
+                ship_weight_kg=DataNormalizer._safe_float(raw.get("SHIPWT")),
+                freight_charges_usd=DataNormalizer._safe_float(raw.get("FREIGHT_CHARGES")),
+                containerized=containerized,
+                distribution_flag=df,
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize transborder freight: %s | raw=%s", exc, raw)
+            return None
+
+    @staticmethod
+    def _parse_percent(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(str(value).rstrip("%").strip())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def normalize_aar_weekly(raw: dict[str, Any]) -> AARWeeklyTraffic | None:
+        """`raw` is one parsed AAR press-release row with week_end_date as an
+        ISO string or date; the %s arrive as strings like '1.8%' / '-6.1%'."""
+        try:
+            snapshot = DataNormalizer._parse_date(raw.get("week_end_date"))
+            week_number = DataNormalizer._safe_int(raw.get("week_number"))
+            year = DataNormalizer._safe_int(raw.get("year"))
+            region = raw.get("region")
+            category = raw.get("category")
+            this_week = DataNormalizer._safe_int(raw.get("this_week_cars"))
+            ytd = DataNormalizer._safe_int(raw.get("ytd_cars"))
+            if (
+                snapshot is None
+                or week_number is None
+                or year is None
+                or not region
+                or not category
+                or this_week is None
+                or ytd is None
+            ):
+                return None
+
+            return AARWeeklyTraffic(
+                snapshot_date=snapshot,
+                region=str(region),
+                week_number=week_number,
+                year=year,
+                category=str(category),
+                this_week_cars=this_week,
+                this_week_yoy_pct=DataNormalizer._parse_percent(raw.get("this_week_yoy_pct")),
+                ytd_cars=ytd,
+                ytd_avg_week_cars=DataNormalizer._safe_int(raw.get("ytd_avg_week_cars")),
+                ytd_yoy_pct=DataNormalizer._parse_percent(raw.get("ytd_yoy_pct")),
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize AAR weekly row: %s | raw=%s", exc, raw)
             return None
 
     @staticmethod

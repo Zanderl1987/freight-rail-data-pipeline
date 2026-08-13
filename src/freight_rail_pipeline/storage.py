@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .config import PipelineConfig
 from .models.schemas import (
+    AARWeeklyTrafficBatch,
     EurostatRailFreightBatch,
     FreightIndicatorBatch,
     MotorCarrierCensusBatch,
@@ -21,12 +22,18 @@ from .models.schemas import (
     RailSafetyIncidentBatch,
     RailServiceMetricBatch,
     RailTariffRateBatch,
+    TransBorderFreightBatch,
+    WaybillShipmentBatch,
 )
 
 log = logging.getLogger(__name__)
 
 
-def _partition_path(base: Path, source: str, table: str, dt: date) -> Path:
+def _partition_path(
+    base: Path, source: str, table: str, dt: date, granularity: str = "day"
+) -> Path:
+    if granularity == "year":
+        return base / source / table / f"year={dt.year}"
     return base / source / table / f"year={dt.year}" / f"month={dt.month:02d}" / f"day={dt.day:02d}"
 
 
@@ -159,6 +166,108 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "waybill_shipments": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("accounting_period", pa.utf8()),
+                pa.field("carloads", pa.int64()),
+                pa.field("car_ownership", pa.utf8(), nullable=True),
+                pa.field("aar_equipment_type", pa.utf8(), nullable=True),
+                pa.field("aar_mechanical_designation", pa.utf8(), nullable=True),
+                pa.field("stb_car_type", pa.utf8(), nullable=True),
+                pa.field("tofc_cofc_service_code", pa.utf8(), nullable=True),
+                pa.field("tofc_cofc_units", pa.int64(), nullable=True),
+                pa.field("tcu_ownership", pa.utf8(), nullable=True),
+                pa.field("tcu_type", pa.utf8(), nullable=True),
+                pa.field("hazardous_boxcar_flag", pa.utf8(), nullable=True),
+                pa.field("stcc", pa.utf8()),
+                pa.field("billed_tons", pa.float64(), nullable=True),
+                pa.field("actual_tons", pa.float64(), nullable=True),
+                pa.field("freight_revenue", pa.float64(), nullable=True),
+                pa.field("transit_charges", pa.float64(), nullable=True),
+                pa.field("miscellaneous_charges", pa.float64(), nullable=True),
+                pa.field("inter_intra_state_code", pa.utf8(), nullable=True),
+                pa.field("type_of_move", pa.utf8(), nullable=True),
+                pa.field("all_rail_intermodal_code", pa.utf8(), nullable=True),
+                pa.field("type_of_move_via_water", pa.utf8(), nullable=True),
+                pa.field("transit_code", pa.utf8(), nullable=True),
+                pa.field("substituted_truck_for_rail", pa.utf8(), nullable=True),
+                pa.field("rebill_code", pa.utf8(), nullable=True),
+                pa.field("estimated_shortline_miles", pa.int64(), nullable=True),
+                pa.field("stratum_id", pa.int64(), nullable=True),
+                pa.field("subsample_id", pa.int64(), nullable=True),
+                pa.field("exact_expansion_factor", pa.float64(), nullable=True),
+                pa.field("theoretical_expansion_factor", pa.int64(), nullable=True),
+                pa.field("num_interchanges", pa.int64(), nullable=True),
+                pa.field("origin_bea_area", pa.int64(), nullable=True),
+                pa.field("origin_freight_territory", pa.utf8(), nullable=True),
+                pa.field("interchange_states", pa.utf8(), nullable=True),
+                pa.field("termination_bea_area", pa.int64(), nullable=True),
+                pa.field("termination_freight_territory", pa.utf8(), nullable=True),
+                pa.field("reporting_period_length", pa.utf8(), nullable=True),
+                pa.field("car_capacity", pa.int64(), nullable=True),
+                pa.field("nominal_car_capacity", pa.int64(), nullable=True),
+                pa.field("tare_weight", pa.int64(), nullable=True),
+                pa.field("outside_length", pa.int64(), nullable=True),
+                pa.field("outside_width", pa.int64(), nullable=True),
+                pa.field("outside_height", pa.int64(), nullable=True),
+                pa.field("extreme_outside_height", pa.int64(), nullable=True),
+                pa.field("wheel_bearings_type", pa.utf8(), nullable=True),
+                pa.field("num_axles", pa.int64(), nullable=True),
+                pa.field("draft_gear", pa.utf8(), nullable=True),
+                pa.field("num_articulated_units", pa.int64(), nullable=True),
+                pa.field("aar_error_codes", pa.utf8(), nullable=True),
+                pa.field("routing_error_flag", pa.utf8(), nullable=True),
+                pa.field("expanded_carloads", pa.int64(), nullable=True),
+                pa.field("expanded_tons", pa.int64(), nullable=True),
+                pa.field("expanded_freight_revenue", pa.float64(), nullable=True),
+                pa.field("expanded_trailer_container_count", pa.int64(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
+        "transborder_freight": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("trade_type", pa.utf8()),
+                pa.field("country", pa.utf8()),
+                pa.field("year", pa.int64()),
+                pa.field("month", pa.int64()),
+                pa.field("mode", pa.utf8()),
+                pa.field("disagg_mode", pa.int64(), nullable=True),
+                pa.field("source_file", pa.utf8(), nullable=True),
+                pa.field("us_state", pa.utf8(), nullable=True),
+                pa.field("district_port", pa.utf8(), nullable=True),
+                pa.field("commodity_2digit", pa.utf8(), nullable=True),
+                pa.field("canada_province", pa.utf8(), nullable=True),
+                pa.field("mexico_state", pa.utf8(), nullable=True),
+                pa.field("value_usd", pa.float64()),
+                pa.field("ship_weight_kg", pa.float64(), nullable=True),
+                pa.field("freight_charges_usd", pa.float64(), nullable=True),
+                pa.field("containerized", pa.bool_(), nullable=True),
+                pa.field("distribution_flag", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
+        "aar_weekly_traffic": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("region", pa.utf8()),
+                pa.field("week_number", pa.int64()),
+                pa.field("year", pa.int64()),
+                pa.field("category", pa.utf8()),
+                pa.field("this_week_cars", pa.int64()),
+                pa.field("this_week_yoy_pct", pa.float64(), nullable=True),
+                pa.field("ytd_cars", pa.int64()),
+                pa.field("ytd_avg_week_cars", pa.int64(), nullable=True),
+                pa.field("ytd_yoy_pct", pa.float64(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     try:
         return schemas[table_name]
@@ -246,11 +355,44 @@ class StorageWriter:
             return 0
         return self._write_table("rail_eurostat_freight", batch.records, dt)
 
+    def write_waybills(
+        self,
+        batch: WaybillShipmentBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        # Annual dataset (~2M rows): partition by year, skip the CSV fallback
+        # (a ~300MB text dump per year adds nothing over the parquet).
+        return self._write_table(
+            "waybill_shipments", batch.records, dt, partition="year", write_csv=False
+        )
+
+    def write_transborder_freight(
+        self,
+        batch: TransBorderFreightBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("transborder_freight", batch.records, dt)
+
+    def write_aar_weekly(
+        self,
+        batch: AARWeeklyTrafficBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("aar_weekly_traffic", batch.records, dt)
+
     def _write_table(
         self,
         table_name: str,
         records: Sequence[BaseModel],
         dt: date | None = None,
+        partition: str = "day",
+        write_csv: bool = True,
     ) -> int:
         if not records:
             return 0
@@ -269,13 +411,28 @@ class StorageWriter:
                 snapshot = dt or date.today()
             return snapshot if isinstance(snapshot, date) else dt or date.today()
 
-        written = 0
-        by_date: dict[date, list[BaseModel]] = {}
+        # Group by the physical partition key. Day partitions are unique per
+        # snapshot date; year partitions must MERGE every snapshot that falls in
+        # the same year into one file -- otherwise each group rewrites the same
+        # `year=YYYY/<table>.parquet` and only the last one survives.
+        key_fn = (
+            (lambda s: s.year) if partition == "year" else (lambda s: (s.year, s.month, s.day))
+        )
+        by_key: dict[int | tuple[int, int, int], list[BaseModel]] = {}
         for record in records:
-            by_date.setdefault(partition_date(record), []).append(record)
+            by_key.setdefault(key_fn(partition_date(record)), []).append(record)
 
-        for snapshot, day_records in sorted(by_date.items()):
-            partition_dir = _partition_path(self.output_dir, "freight", table_name, snapshot)
+        written = 0
+        for key, day_records in sorted(by_key.items()):
+            if isinstance(key, int):
+                partition_dir = _partition_path(
+                    self.output_dir, "freight", table_name, date(key, 1, 1), "year"
+                )
+            else:
+                year, month, day = key
+                partition_dir = _partition_path(
+                    self.output_dir, "freight", table_name, date(year, month, day)
+                )
             partition_dir.mkdir(parents=True, exist_ok=True)
 
             # Serialize raw_record to JSON string for parquet compatibility
@@ -306,10 +463,11 @@ class StorageWriter:
             log.info("Wrote %d records to %s", len(day_records), file_path)
             self.written_paths.append(str(file_path))
 
-            # Write CSV as fallback
-            csv_path = partition_dir / f"{table_name}.csv"
-            df.to_csv(csv_path, index=False)
-            log.info("Wrote %d records to %s", len(day_records), csv_path)
+            # Write CSV as fallback (skipped for very large annual tables)
+            if write_csv:
+                csv_path = partition_dir / f"{table_name}.csv"
+                df.to_csv(csv_path, index=False)
+                log.info("Wrote %d records to %s", len(day_records), csv_path)
 
             written += len(day_records)
 

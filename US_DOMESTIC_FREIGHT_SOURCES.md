@@ -1,11 +1,12 @@
 # US Domestic Freight & Transportation Data Sources — Research Report
 
-Research date: 2026-08-02 (updated 2026-08-09). Scope: free/low-cost sources for
+Research date: 2026-08-02 (updated 2026-08-12). Scope: free/low-cost sources for
 US domestic freight and transportation data (rail, truck, barge, pipeline, air)
 to expand the freight rail pipeline beyond the existing USDA AgTransport
 (Socrata) and Freightos FBX sources. The 2026-08-09 update adds verified live
 endpoint checks for new candidates (Eurostat, FRED, FMC, Census, UN Comtrade,
-AIS/maritime).
+AIS/maritime). The 2026-08-12 update documents the three keyless rail sources
+built live this session (STB Waybill PUF, BTS TransBorder, AAR weekly).
 
 Verdict key:
 
@@ -20,11 +21,11 @@ Verdict key:
 | Source | Access | Free? | Backfill | Cadence | Verdict |
 |---|---|---|---|---|---|
 | **STB Rail Service Data** | Bulk download + AgTransport Socrata (`axkm-yjzy`) | Yes | Oct 2014+ | Weekly | **GO** |
-| **STB Waybill PUF** | Annual Public Use File (CSV) | Yes (PUF); full sample gated | Years of annual files | Annual | **GO** (PUF only) |
+| **STB Waybill PUF** | Annual Public Use File (fixed-width zip) | Yes (PUF); full sample gated | Annual files (backdated records inside) | Annual | **GO** (built 2026-08-12) |
 | **BTS Freight Indicators** | data.bts.gov Socrata | Yes | Varies by series (some to ~1990s) | Monthly / weekly | **GO** |
-| **BTS TransBorder Freight** | data.bts.gov Socrata | Yes | 1994+ | Monthly | **GO** (bulk/ArcGIS; Socrata table non-tabular) |
+| **BTS TransBorder Freight** | Monthly raw-data zips on bts.gov | Yes | 1994+ (zip naming varies) | Monthly | **GO** (built 2026-08-12) |
 | **BTS FAF6** | `faf.ornl.gov/faf6` tabulation tool + bulk | Yes | 2012–2050 (estimates/forecast) | Periodic | **GO** |
-| **AAR weekly rail traffic** | Weekly press-release PDFs | Yes (PDF); full history gated | Spot-check needed | Weekly | **SPIKE** |
+| **AAR weekly rail traffic** | Weekly press-release PDFs (RSS → release → PDF) | Yes (PDF); full history gated | Forward-only (feed holds current week) | Weekly | **GO** (built 2026-08-12, forward-only) |
 | **FRA Safety Data** | data.transportation.gov Socrata + OData/ArcGIS APIs | Yes | Decades (accidents to 1975+) | Monthly | **GO** |
 | **EIA API v2** | REST + free API key | Yes | 2000s+ by series | Weekly/monthly | **GO** |
 | **EIA rail crude movements** | (former series) | — | Discontinued Oct 2025 | — | **NO-GO** |
@@ -63,10 +64,11 @@ Verdict key:
 - Verdict: **GO**. Add as a Socrata dataset via the existing AgTransport client; cross-check against stb.gov bulk.
 
 **Carload Waybill Sample**
-- URL: `stb.gov/reports-data/waybill/`
+- URL: `stb.gov/reports-data/waybill/`; annual zip at `stb.gov/wp-content/uploads/PublicUseWaybillSample{YYYY}.zip`.
 - Data: annual stratified sample of carloads with origin–destination and commodity — the richest rail OD dataset.
-- Access: **Public Use File** (confidentiality-scrubbed, fields collapsed) is public CSV. The full confidential file requires a "confidential user" application and STB approval — do not plan on it.
-- Backfill: annual files spanning many years.
+- Access: **Public Use File** (confidentiality-scrubbed, fields collapsed) is a 247-byte fixed-width txt inside a public zip; **verified live 2026-08-12** — the 2024 sample is ~68MB / 2.18M records. Fields sliced per Table 4-6 of the STB reference guide (waybill date, accounting period, carloads, ownership, AAR equipment, STCC, tons, revenue, charges, shortline miles, expansion factors, interchanges, BEA areas, car dimensions, expanded weights). Century inference picks the year nearest the reference year.
+- **Built 2026-08-12**: `sources/stb_waybill.py` (streams zip → temp, slices fixed-width rows), storage table `waybill_shipments` partitioned per waybill year (no CSV fallback; ~43MB for the 2024 sample year). Source is idempotent — skips a sample year whose `year=YYYY` partition already exists.
+- Backfill: annual files spanning many years (records inside a single sample zip carry waybill dates from earlier years).
 - Verdict: **GO** for the PUF only; expect heavy scrubbing (revenue/OD collapsed). Full-sample access is effectively a dead end without an agency data agreement.
 
 ### 2. BTS — Bureau of Transportation Statistics
@@ -78,11 +80,12 @@ Verdict key:
 - Verdict: **GO**. This is the free answer to trucking spot rates (DAT data is otherwise a paid product).
 
 **TransBorder Freight**
-- URL: `bts.gov/transborder` (full app); Socrata story `kijm-95mr`.
-- Data: monthly truck/rail/pipeline/cable freight value and weight across US borders (NAFTA + all partners).
-- Access: public Socrata, monthly (R/P1M), accessLevel public. **2026-08-09 probe**: the Socrata "story" `kijm-95mr` is a non-tabular dataset — the Socrata query API returns 403 ("no row or column access to non-tabular tables"). `crem-w557` is a different (unrelated) dataset, not TransBorder. Use the bulk/ArcGIS or the bts.gov app rather than the Socrata query endpoint.
-- Backfill: 1994+.
-- Verdict: **GO** (via bulk/ArcGIS path), **SPIKE** on exact bulk URL.
+- URL: `bts.gov/topics/transborder-raw-data` (bulk raw-data page); monthly zips at `bts.gov/sites/bts.dot.gov/files/transborder-raw/{YYYY}/{File}.zip` (zip member names vary by year — Jan 2026 used `dot1_0126.csv`, `dot2_0126.csv`, `dot3_0126.csv`).
+- Data: monthly truck/rail/pipeline/air/vessel freight value and weight across US borders (NAFTA + all partners).
+- Access: public zips, no key. **Verified live 2026-08-12**: 403s from Akamai are pacing (3s between requests) + `Referer: https://www.bts.gov/`; `Content-Type: text/html` responses are retryable errors. The three CSVs are distinct overlapping views (dot1 = state+port, dot2 = state+commodity, dot3 = port+commodity); rows are tagged `source_file` so overlaps can be deduped at query time. `COUNTRY` holds Census numeric codes (1220→CA, 2010→MX); `CONTCODE` 1 = containerized; `DISAGMOT` is the transport mode code.
+- **Built 2026-08-12**: `sources/bts_transborder.py`, storage table `transborder_freight` (per-day partition, includes `source_file`). June 2026 pull: 126,985 rows, ~$471B.
+- Backfill: 1994+ (zip naming varies by year — expect per-year format probing).
+- Verdict: **GO** via the bts.gov raw-data zips. The Socrata story `kijm-95mr` remains non-tabular (403 on the query API); `crem-w557` is unrelated.
 
 **FAF6 — Freight Analysis Framework**
 - URL: `bts.gov/faf`; tabulation tool at `faf.ornl.gov/faf6`
@@ -98,10 +101,11 @@ Verdict key:
 
 ### 3. AAR — Association of American Railroads
 
-- URL: `aar.org/news/` weekly rail traffic press releases (verified live for 2026: e.g. `2026-06-17-railtraffic.pdf` on aar.org).
-- Data: weekly US rail carloads + intermodal units, commodity breakdown, YoY comparisons.
-- Access: weekly releases now carry public downloadable PDF links — an improvement over the older "member-gated chart only" situation. Full historical tabular dataset still sits behind the member portal; not verified whether the PDFs alone give usable historical depth.
-- Verdict: **SPIKE**. Probe: pull a year of weekly PDFs and confirm (a) machine-parseable tables, (b) enough history for meaningful backfill. If parse works, it's a weekly GO; if it needs the member portal, it stays a manual/NO-GO.
+- URL: weekly rail traffic category feed `aar.org/aar_news/weekly-rail-traffic-data/feed/` (the site-wide `/feed/` carries only general news) → release page → PDF (a bare `…/railtraffic.pdf` link, sometimes with `utm_*` query params, e.g. `aar.org/wp-content/uploads/2026/08/2026-08-12-railtraffic.pdf`).
+- Data: weekly US/Canada/Mexico/North America rail carloads + intermodal units, ~13 commodity rows per region, YoY % comparisons. PyMuPDF parses the 4-page PDF cleanly (verified live 2026-08-12: week 31 2026, US Coal 57,976 cars, -6.1%).
+- Access: the category feed exposes the current week's release; weekly PDFs are parseable.
+- **Built 2026-08-12**: `sources/aar_weekly.py`, storage table `aar_weekly_traffic` (partitioned by week-end date). Forward-only: the feed holds only recent weeks, so backfill would need the (rate-limited, slow) archive walk — not worth it; capture weekly going forward.
+- Verdict: **GO** (forward-only weekly feed). Full historical tabular dataset still sits behind the member portal.
 
 ### 4. FRA — Federal Railroad Administration
 
@@ -229,12 +233,10 @@ Verdict key:
 3. FRED 120 req/min figure (third-party source only).
 4. FMC XLSX parsing and exact current-quarter file URL pattern.
 5. USA Trade Online free vs paid tier for programmatic export.
-6. AAR weekly PDFs: parseability + historical depth without member portal.
-7. FRA OData/ArcGIS current auth model.
-8. USACE/WCSC file format and post-2016 coverage.
-9. ATA-truck-tonnage redistribution limits on FRED/FRED terms.
-10. BTS TransBorder bulk/ArcGIS exact download URL (Socrata table is non-tabular).
-11. UN Comtrade free tier exact daily quota and endpoint shape.
+6. FRA OData/ArcGIS current auth model.
+7. USACE/WCSC file format and post-2016 coverage.
+8. ATA-truck-tonnage redistribution limits on FRED/FRED terms.
+9. UN Comtrade free tier exact daily quota and endpoint shape.
 
 ## Suggested build order
 
@@ -249,4 +251,10 @@ Verdict key:
 9. **FMC quarterly XLSX** — parse + schedule quarterly.
 10. **STB Rail Service Metrics** via AgTransport Socrata dataset `axkm-yjzy`.
 11. **USDA GTR grain datasets** on AgTransport.
-12. Spikes: AAR weekly PDFs, USA Trade Online, FMCSA, USACE/WCSC, maritime AIS.
+12. Spikes: USA Trade Online, FMCSA, USACE/WCSC, maritime AIS.
+
+## Built 2026-08-12 (keyless freight rail sources)
+
+13. **STB Waybill PUF** — annual fixed-width zip → `waybill_shipments` (year partitions). **DONE**
+14. **BTS TransBorder** — monthly raw-data zips → `transborder_freight` (day partitions, `source_file`-tagged). **DONE**
+15. **AAR weekly rail traffic** — RSS → release → PDF parse → `aar_weekly_traffic` (forward-only). **DONE**

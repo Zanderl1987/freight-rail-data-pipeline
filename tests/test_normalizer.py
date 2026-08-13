@@ -468,3 +468,161 @@ class TestRailSafetyIncidentNormalizer:
         raw = {"reportkey": "x", "date": None}
         result = DataNormalizer.normalize_rail_safety_incident(raw, "train_accident")
         assert result is None
+
+class TestWaybillShipmentNormalizer:
+    def test_valid_record(self) -> None:
+        raw = {
+            "waybill_date": "041118",
+            "accounting_period": "0324",
+            "carloads": "0001",
+            "car_ownership": "P",
+            "aar_equipment_type": "T106",
+            "stb_car_type": "51",
+            "stcc": "48110",
+            "billed_tons": "00100",
+            "actual_tons": "00100",
+            "freight_revenue": "000023475",
+            "transit_charges": "000000000",
+            "miscellaneous_charges": "000000000",
+            "exact_expansion_factor": "00500",
+            "theoretical_expansion_factor": "005",
+            "expanded_carloads": "000005",
+            "expanded_tons": "000000500",
+            "expanded_freight_revenue": "000000117375",
+            "interchange_state_1": "ND",
+        }
+        result = DataNormalizer.normalize_waybill_shipment(raw, reference_year=2024)
+        assert result is not None
+        assert result.snapshot_date == date(2018, 4, 11)
+        assert result.accounting_period == "03/24"
+        assert result.carloads == 1
+        assert result.stcc == "48110"
+        assert result.freight_revenue == 23475.0
+        assert result.expanded_carloads == 5
+        assert result.interchange_states == "ND"
+
+    def test_century_inference_prefers_nearest_to_reference_year(self) -> None:
+        # A 2024 sample can contain waybills dated a few years earlier; the
+        # century must resolve to the 2000s, never 1900s.
+        assert DataNormalizer._parse_waybill_date("041118", 2024) == date(2018, 4, 11)
+        assert DataNormalizer._parse_waybill_date("123124", 2024) == date(2024, 12, 31)
+        assert DataNormalizer._parse_waybill_date("010125", 2024) == date(2025, 1, 1)
+
+    def test_blank_stcc_returns_none(self) -> None:
+        raw = {"carloads": "0001", "stcc": "     "}
+        result = DataNormalizer.normalize_waybill_shipment(raw, reference_year=2024)
+        assert result is None
+
+    def test_missing_carloads_returns_none(self) -> None:
+        raw = {"stcc": "48110"}
+        result = DataNormalizer.normalize_waybill_shipment(raw, reference_year=2024)
+        assert result is None
+
+    def test_invalid_date_returns_none(self) -> None:
+        raw = {"carloads": "0001", "stcc": "48110", "waybill_date": "023024"}
+        result = DataNormalizer.normalize_waybill_shipment(raw, reference_year=2024)
+        assert result is None
+
+
+class TestTransBorderFreightNormalizer:
+    def test_valid_truck_row_dot1(self) -> None:
+        raw = {
+            "TRDTYPE": "1",
+            "USASTATE": "AK",
+            "DEPE": "0901",
+            "DISAGMOT": "5",
+            "MEXSTATE": "",
+            "CANPROV": "XY",
+            "COUNTRY": "1220",
+            "VALUE": "42199",
+            "SHIPWT": "0",
+            "FREIGHT_CHARGES": "62",
+            "DF": "1",
+            "CONTCODE": "1",
+            "MONTH": "01",
+            "YEAR": "2026",
+        }
+        result = DataNormalizer.normalize_transborder_freight(raw, source_file="dot1")
+        assert result is not None
+        assert result.snapshot_date == date(2026, 1, 31)
+        assert result.trade_type == "import"
+        assert result.country == "CA"
+        assert result.mode == "truck"
+        assert result.value_usd == 42199.0
+        assert result.containerized is True
+        assert result.us_state == "AK"
+        assert result.source_file == "dot1"
+
+    def test_mexico_export_maps_country_code(self) -> None:
+        raw = {
+            "TRDTYPE": "2",
+            "DISAGMOT": "6",
+            "COUNTRY": "2010",
+            "VALUE": "1000",
+            "MONTH": "02",
+            "YEAR": "2025",
+        }
+        result = DataNormalizer.normalize_transborder_freight(raw)
+        assert result is not None
+        assert result.country == "MX"
+        assert result.mode == "rail"
+        assert result.trade_type == "export"
+        assert result.disagg_mode == 6
+        assert result.containerized is False
+
+    def test_rail_row_dot2_keeps_commodity(self) -> None:
+        raw = {
+            "TRDTYPE": "1",
+            "USASTATE": "WA",
+            "COMMODITY2": "10",
+            "DISAGMOT": "6",
+            "COUNTRY": "1220",
+            "VALUE": "50000",
+            "SHIPWT": "12000",
+            "FREIGHT_CHARGES": "800",
+            "DF": "",
+            "CONTCODE": "X",
+            "MONTH": "01",
+            "YEAR": "2026",
+        }
+        result = DataNormalizer.normalize_transborder_freight(raw, source_file="dot2")
+        assert result is not None
+        assert result.commodity_2digit == "10"
+        assert result.containerized is False
+
+    def test_missing_value_returns_none(self) -> None:
+        raw = {"TRDTYPE": "1", "COUNTRY": "1220", "MONTH": "01", "YEAR": "2026"}
+        result = DataNormalizer.normalize_transborder_freight(raw)
+        assert result is None
+
+
+class TestAARWeeklyNormalizer:
+    def test_valid_row(self) -> None:
+        raw = {
+            "region": "US",
+            "week_number": "31",
+            "year": "2026",
+            "week_end_date": "2026-08-08",
+            "category": "Coal",
+            "this_week_cars": "57976",
+            "this_week_yoy_pct": "-6.1%",
+            "ytd_cars": "1761694",
+            "ytd_avg_week_cars": "56829",
+            "ytd_yoy_pct": "-1.8%",
+        }
+        result = DataNormalizer.normalize_aar_weekly(raw)
+        assert result is not None
+        assert result.snapshot_date == date(2026, 8, 8)
+        assert result.region == "US"
+        assert result.week_number == 31
+        assert result.year == 2026
+        assert result.category == "Coal"
+        assert result.this_week_cars == 57976
+        assert result.this_week_yoy_pct == -6.1
+        assert result.ytd_cars == 1761694
+        assert result.ytd_yoy_pct == -1.8
+
+    def test_missing_required_fields_returns_none(self) -> None:
+        raw = {"region": "US", "category": "Coal"}
+        result = DataNormalizer.normalize_aar_weekly(raw)
+        assert result is None

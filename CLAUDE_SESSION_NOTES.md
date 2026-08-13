@@ -125,6 +125,44 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   should be launched detached and polled for the run JSON, not run in a blocking shell.
 - **2026-08-10**: Verified repo state clean + pushed (`d7c0201`); remote `main` at
   `d7c0201`, 0 ahead/0 behind.
+- **2026-08-12**: **Built three keyless freight-rail sources** (all GO in
+  `US_DOMESTIC_FREIGHT_SOURCES.md`, updated same day): STB Waybill PUF, BTS TransBorder,
+  AAR weekly rail traffic.
+  - **STB Waybill PUF** (`sources/stb_waybill.py` → table `waybill_shipments`): annual
+    zip at `stb.gov/wp-content/uploads/PublicUseWaybillSample{YYYY}.zip`; inside is a
+    247-byte fixed-width txt (539,561,337 bytes for 2024). Field slices per Table 4-6 of
+    the STB reference guide live in `_FIELD_SLICES` (verified against a PDF copy of the
+    layout). Century inference (`_parse_waybill_date`) picks the year nearest the
+    reference year. Idempotent: skips a sample year whose `year=YYYY` partition exists.
+    Year partition, no CSV fallback.
+  - **BTS TransBorder** (`sources/bts_transborder.py` → table `transborder_freight`):
+    monthly zips from `bts.gov/topics/transborder-raw-data` (path
+    `bts.gov/sites/bts.dot.gov/files/transborder-raw/{YYYY}/{File}.zip`, member names
+    vary). Akamai 403 = pacing (3s) + `Referer` + retry on 403/429/5xx; also treat
+    `Content-Type: text/html` as a retryable error. Each month ships 3 overlapping views
+    (dot1 state+port, dot2 state+commodity, dot3 port+commodity) — rows tagged
+    `source_file` so query-time dedup is possible. `COUNTRY` is Census numeric codes
+    (1220→CA, 2010→MX); `CONTCODE` 1 = containerized; `DISAGMOT` = mode.
+  - **AAR weekly** (`sources/aar_weekly.py` → table `aar_weekly_traffic`): the site-wide
+    `/feed/` only carries general news — the traffic releases live on the category feed
+    `aar.org/aar_news/weekly-rail-traffic-data/feed/`. Release page embeds the PDF as a
+    **bare URL** (no `href` attr) with `utm_*` query params, so `_release_pdf_url`
+    matches bare absolute PDF URLs, `html.unescape`s, and strips the query string.
+    PyMuPDF parses pages 0–3 (US/Canada/Mexico/North America × 13 rows). Forward-only
+    (feed holds only recent weeks).
+- **2026-08-12**: **Live runs (via CLI `run -s …`) all verified**: `aar_weekly` 52 records
+  (week 31/2026, US Coal 57,976 cars, -6.1%); `transborder` 126,985 records for June 2026
+  (CA/MX, 8 modes, $471B, `source_file` dot1=30,217 dot2=79,126 dot3=17,642);
+  `stb_waybill` 2,166,913 records across 6 year partitions (2018, 2020–2024; 699 distinct
+  STCCs; waybill dates 2018-04-11 → 2024-12-31; ~$21.6B freight revenue). **Found + fixed
+  a real bug via the live run**: `_write_table` grouped records by full snapshot date but
+  wrote every group to the same `year=YYYY/<table>.parquet` for year-granularity tables,
+  so each group overwrote the last — the first waybill run claimed 2.17M written but only
+  2,770 rows landed. Fixed by merging groups by partition key (year collapses all
+  snapshots into one file; day partitions unchanged), added a regression test
+  (`test_year_partition_merges_snapshots_in_same_year`), deleted the corrupt partition
+  dir, re-ran: 2,166,913 rows on disk, matching the run count. Gates: **125 tests pass**,
+  ruff clean, mypy --strict clean (23 files).
 
 ## Open items
 
@@ -136,12 +174,13 @@ Running narrative log for this repo. Companion cross-repo docs (not in this repo
   built 8/9, still never run against a real key.)
 - **Freightos API key** — external action only Zander can take (freightos.com signup).
   Blocks the ocean-freight-rate half of the pipeline; USDA rail data does not need it.
-- **GO-flagged sources not yet built**: STB Rail Service Data, BTS TransBorder (bulk/
-  ArcGIS path — Socrata table is non-tabular/403), BTS FAF6, EIA, BLS PPI, Census Intl
-  Trade, UN Comtrade, FMC quarterly XLSX — see `US_DOMESTIC_FREIGHT_SOURCES.md` for the
-  full source-vetting backlog with GO/NO-GO calls per source.
+- **GO-flagged sources not yet built**: STB Rail Service Data, BTS FAF6, EIA, BLS PPI,
+  Census Intl Trade, UN Comtrade, FMC quarterly XLSX — see `US_DOMESTIC_FREIGHT_SOURCES.md`
+  for the full source-vetting backlog with GO/NO-GO calls per source. (Built 2026-08-12:
+  STB Waybill PUF, BTS TransBorder, AAR weekly — all three keyless.)
 - **HuggingFace sync**: last synced 2026-08-09 (7 tables / 4,345,102 rows / 144.73 MB,
   includes `rail_eurostat_freight`). The PR #1 merge brings in the motor-carrier-census
-  table, and the 2026-08-10 refresh updated all 7 tables (now 4,348,342 records) — **the
-  HF dataset is behind the current local store by one run.** Re-run `upload_huggingface.py`
-  next time HF freshness matters.
+  table, the 2026-08-10 refresh updated all 7 tables (now 4,348,342 records), and the
+  2026-08-12 session added 3 new tables (`waybill_shipments` 2.17M, `transborder_freight`
+  127k, `aar_weekly_traffic` 52) — **the HF dataset is behind the local store by several
+  runs.** Re-run `upload_huggingface.py` next time HF freshness matters.

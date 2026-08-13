@@ -11,6 +11,7 @@ from . import sources as src
 from .config import PipelineConfig
 from .logging_setup import setup_logging
 from .models.schemas import (
+    AARWeeklyTrafficBatch,
     EurostatRailFreightBatch,
     FreightIndicatorBatch,
     MotorCarrierCensusBatch,
@@ -20,6 +21,8 @@ from .models.schemas import (
     RailSafetyIncidentBatch,
     RailServiceMetricBatch,
     RailTariffRateBatch,
+    TransBorderFreightBatch,
+    WaybillShipmentBatch,
 )
 from .storage import StorageWriter
 
@@ -57,6 +60,9 @@ class FreightPipeline:
             "fmcsa": src.FMCSACarrierCensusSource(self.config),
             "eurostat": src.EurostatRailSource(self.config),
             "fred": src.FREDSource(self.config),
+            "stb_waybill": src.STBWaybillSource(self.config),
+            "transborder": src.BTSTransBorderSource(self.config),
+            "aar_weekly": src.AARWeeklyTrafficSource(self.config),
         }
 
     def run(
@@ -222,6 +228,27 @@ class FreightPipeline:
         if er_records:
             written += self.storage.write_rail_eurostat_freight(
                 EurostatRailFreightBatch(records=er_records),
+                dt=snapshot_date,
+            )
+
+        ws_records = [r for r in records if type(r).__name__ == "WaybillShipment"]
+        if ws_records:
+            written += self.storage.write_waybills(
+                WaybillShipmentBatch(records=ws_records),
+                dt=snapshot_date,
+            )
+
+        tb_records = [r for r in records if type(r).__name__ == "TransBorderFreight"]
+        if tb_records:
+            written += self.storage.write_transborder_freight(
+                TransBorderFreightBatch(records=tb_records),
+                dt=snapshot_date,
+            )
+
+        aw_records = [r for r in records if type(r).__name__ == "AARWeeklyTraffic"]
+        if aw_records:
+            written += self.storage.write_aar_weekly(
+                AARWeeklyTrafficBatch(records=aw_records),
                 dt=snapshot_date,
             )
 

@@ -1,5 +1,7 @@
 from .normalizer import DataNormalizer
 from .schemas import (
+    AARWeeklyTraffic,
+    AARWeeklyTrafficBatch,
     EurostatRailFreight,
     EurostatRailFreightBatch,
     FreightIndicator,
@@ -17,6 +19,10 @@ from .schemas import (
     RailServiceMetricBatch,
     RailTariffRate,
     RailTariffRateBatch,
+    TransBorderFreight,
+    TransBorderFreightBatch,
+    WaybillShipment,
+    WaybillShipmentBatch,
 )
 
 __all__ = [
@@ -36,6 +42,12 @@ __all__ = [
     "MotorCarrierCensusBatch",
     "EurostatRailFreight",
     "EurostatRailFreightBatch",
+    "WaybillShipment",
+    "WaybillShipmentBatch",
+    "TransBorderFreight",
+    "TransBorderFreightBatch",
+    "AARWeeklyTraffic",
+    "AARWeeklyTrafficBatch",
     "PipelineRunSummary",
     "DataNormalizer",
 ]

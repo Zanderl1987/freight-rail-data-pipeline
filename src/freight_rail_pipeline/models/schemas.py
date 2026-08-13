@@ -256,6 +256,167 @@ class EurostatRailFreightBatch(BaseModel):
         return len(self.records)
 
 
+class WaybillShipment(BaseModel):
+    """One waybill from the STB Carload Waybill Sample Public Use File.
+
+    The PUF is a confidentiality-scrubbed 247-byte fixed-width record per
+    waybill (see the STB reference guide, "247-Byte Public Use Waybill Record
+    Layout"). Weights are short tons, revenue/charges are dollars, expansion
+    factors scale a sampled waybill up to the population. `raw_record` is
+    deliberately omitted -- retaining 247 chars of raw text for ~2M rows would
+    roughly double the store's footprint without adding analytic value."""
+
+    source: str = Field(default="stb_waybill")
+    snapshot_date: date = Field(..., description="Waybill date")
+    accounting_period: str = Field(..., description="Accounting period MM/YY")
+    carloads: int = Field(..., ge=0, description="Number of carloads on the waybill")
+    car_ownership: str | None = Field(
+        default=None, description="Car ownership code: P=private, R=railroad, T=TTX"
+    )
+    aar_equipment_type: str | None = Field(default=None, description="AAR equipment type code")
+    aar_mechanical_designation: str | None = Field(default=None)
+    stb_car_type: str | None = Field(default=None, description="STB Form 710 car type line")
+    tofc_cofc_service_code: str | None = Field(default=None)
+    tofc_cofc_units: int | None = Field(default=None, description="Number of TOFC/COFC units")
+    tcu_ownership: str | None = Field(default=None)
+    tcu_type: str | None = Field(default=None)
+    hazardous_boxcar_flag: str | None = Field(default=None)
+    stcc: str = Field(..., description="5-digit STCC commodity code")
+    billed_tons: float | None = Field(default=None)
+    actual_tons: float | None = Field(default=None)
+    freight_revenue: float | None = Field(default=None, ge=0)
+    transit_charges: float | None = Field(default=None, ge=0)
+    miscellaneous_charges: float | None = Field(default=None, ge=0)
+    inter_intra_state_code: str | None = Field(default=None)
+    type_of_move: str | None = Field(default=None)
+    all_rail_intermodal_code: str | None = Field(default=None)
+    type_of_move_via_water: str | None = Field(default=None)
+    transit_code: str | None = Field(default=None)
+    substituted_truck_for_rail: str | None = Field(default=None)
+    rebill_code: str | None = Field(default=None)
+    estimated_shortline_miles: int | None = Field(default=None, ge=0)
+    stratum_id: int | None = Field(default=None)
+    subsample_id: int | None = Field(default=None)
+    exact_expansion_factor: float | None = Field(default=None, ge=0)
+    theoretical_expansion_factor: int | None = Field(default=None, ge=0)
+    num_interchanges: int | None = Field(default=None, ge=0)
+    origin_bea_area: int | None = Field(default=None, description="Origin Business Economic Area")
+    origin_freight_territory: str | None = Field(default=None)
+    interchange_states: str | None = Field(
+        default=None, description="Comma-joined state codes at each interchange (1-9)"
+    )
+    termination_bea_area: int | None = Field(default=None)
+    termination_freight_territory: str | None = Field(default=None)
+    reporting_period_length: str | None = Field(default=None)
+    car_capacity: int | None = Field(default=None, ge=0)
+    nominal_car_capacity: int | None = Field(default=None, ge=0)
+    tare_weight: int | None = Field(default=None, ge=0)
+    outside_length: int | None = Field(default=None, ge=0)
+    outside_width: int | None = Field(default=None, ge=0)
+    outside_height: int | None = Field(default=None, ge=0)
+    extreme_outside_height: int | None = Field(default=None, ge=0)
+    wheel_bearings_type: str | None = Field(default=None)
+    num_axles: int | None = Field(default=None, ge=0)
+    draft_gear: str | None = Field(default=None)
+    num_articulated_units: int | None = Field(default=None, ge=0)
+    aar_error_codes: str | None = Field(default=None)
+    routing_error_flag: str | None = Field(default=None)
+    expanded_carloads: int | None = Field(default=None, ge=0)
+    expanded_tons: int | None = Field(default=None, ge=0)
+    expanded_freight_revenue: float | None = Field(default=None, ge=0)
+    expanded_trailer_container_count: int | None = Field(default=None, ge=0)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class WaybillShipmentBatch(BaseModel):
+    records: list[WaybillShipment]
+    source: str = "stb_waybill"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+class TransBorderFreight(BaseModel):
+    """One monthly TransBorder raw-data line: U.S. trade with Canada/Mexico by
+    mode, port, and (for rail/other modes) 2-digit commodity. BTS publishes
+    three CSV files per month -- dot1 (state+port detail), dot2 (state+
+    commodity detail), dot3 (port+commodity detail) -- whose column sets
+    differ, so the mode-specific geography/commodity fields are nullable and
+    each row is tagged with the file it came from. The three views overlap
+    (a shipment can appear in more than one), so rows must not be summed
+    across `source_file` blindly. Value/freight are USD; SHIPWT is kilograms;
+    COUNTRY is mapped from Census numeric codes (1220=CA, 2010=MX)."""
+
+    source: str = Field(default="bts_transborder")
+    snapshot_date: date = Field(..., description="Month-end date of the statistical period")
+    trade_type: str = Field(..., description="'import' or 'export' (TRDTYPE)")
+    country: str = Field(..., description="Trading partner: CA or MX")
+    year: int = Field(...)
+    month: int = Field(...)
+    mode: str = Field(..., description="Mode label, e.g. 'rail'")
+    disagg_mode: int | None = Field(default=None, description="Raw DISAGMOT code")
+    source_file: str | None = Field(
+        default=None, description="Source CSV in the monthly zip: dot1/dot2/dot3"
+    )
+    us_state: str | None = Field(default=None, description="USASTATE (origin for exports)")
+    district_port: str | None = Field(default=None, description="DEPE customs district/port code")
+    commodity_2digit: str | None = Field(
+        default=None, description="COMMODITY2 two-digit HTS code (rail/other only)"
+    )
+    canada_province: str | None = Field(default=None, description="CANPROV code (see doc table)")
+    mexico_state: str | None = Field(default=None, description="MEXSTATE code (exports only)")
+    value_usd: float = Field(..., ge=0)
+    ship_weight_kg: float | None = Field(default=None, ge=0)
+    freight_charges_usd: float | None = Field(default=None, ge=0)
+    containerized: bool | None = Field(
+        default=None, description="CONTCODE: 1 = containerized, 0/X/blank = not"
+    )
+    distribution_flag: str | None = Field(default=None, description="BTS 'DF' raw flag")
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class TransBorderFreightBatch(BaseModel):
+    records: list[TransBorderFreight]
+    source: str = "bts_transborder"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+class AARWeeklyTraffic(BaseModel):
+    """One row from an AAR weekly rail-traffic press-release PDF: a category
+    (Total Carloads, a commodity group, Total Intermodal Units, or Total
+    Traffic) for one region (US/Canada/Mexico/North America) for one week.
+    Cars are carloads (or intermodal units/traffic for the totals rows) and
+    the four %s are year-over-year changes vs the prior year's week/YTD."""
+
+    source: str = Field(default="aar_weekly")
+    snapshot_date: date = Field(..., description="Week end date (Saturday)")
+    region: str = Field(..., description="US, Canada, Mexico, or North America")
+    week_number: int = Field(..., ge=1, le=53)
+    year: int = Field(...)
+    category: str = Field(..., description="Commodity group / totals label")
+    this_week_cars: int = Field(..., ge=0)
+    this_week_yoy_pct: float | None = Field(default=None)
+    ytd_cars: int = Field(..., ge=0)
+    ytd_avg_week_cars: int | None = Field(default=None, ge=0)
+    ytd_yoy_pct: float | None = Field(default=None)
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class AARWeeklyTrafficBatch(BaseModel):
+    records: list[AARWeeklyTraffic]
+    source: str = "aar_weekly"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class PipelineRunSummary(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     started_at: datetime = Field(...)

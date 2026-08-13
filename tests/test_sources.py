@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import io
 import json
 import re
+import zipfile
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import responses
 
 from freight_rail_pipeline.config import PipelineConfig
+from freight_rail_pipeline.sources.aar_weekly import (
+    AARWeeklyTrafficSource,
+    parse_aar_page,
+)
 from freight_rail_pipeline.sources.bts_freight_indicators import BTSFreightIndicatorsSource
+from freight_rail_pipeline.sources.bts_transborder import BTSTransBorderSource
 from freight_rail_pipeline.sources.eurostat_rail import DATASET_ID, EurostatRailSource
 from freight_rail_pipeline.sources.fmcsa_carrier_census import (
     SELECT_COLUMNS,
@@ -19,7 +27,13 @@ from freight_rail_pipeline.sources.fmcsa_carrier_census import (
 from freight_rail_pipeline.sources.fra_safety import FRASafetySource
 from freight_rail_pipeline.sources.fred import FREDSource
 from freight_rail_pipeline.sources.freightos_fbx import FBX_ROUTES, FreightosFBXSource
+from freight_rail_pipeline.sources.stb_waybill import (
+    _FIELD_SLICES,
+    STBWaybillSource,
+)
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestUSDAgTransportSource:
@@ -772,3 +786,304 @@ class TestFREDSource:
         assert rec.value == 1.009
         assert rec.snapshot_date == date(2026, 1, 1)
         assert rec.underlying_source == "Cass Information Systems"
+
+
+def _build_waybill_line(**fields: str) -> bytes:
+    buf = bytearray(b" " * 247)
+    for name, value in fields.items():
+        start, end = _FIELD_SLICES[name]
+        encoded = value.encode("ascii")
+        width = end - start
+        if len(encoded) > width:
+            raise ValueError(f"value for {name} longer than field width {width}")
+        buf[start:end] = encoded + b" " * (width - len(encoded))
+    return bytes(buf)
+
+
+class TestSTBWaybillSource:
+    @pytest.fixture
+    def config(self, tmp_path: Path) -> PipelineConfig:
+        return PipelineConfig(output_dir=str(tmp_path), log_dir=str(tmp_path / "logs"))
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> STBWaybillSource:
+        return STBWaybillSource(config)
+
+    def test_parse_record_full_width(self, source: STBWaybillSource) -> None:
+        line = _build_waybill_line(
+            waybill_date="041118",
+            accounting_period="0324",
+            carloads="0001",
+            car_ownership="P",
+            aar_equipment_type="T106",
+            stb_car_type="51",
+            stcc="48110",
+            billed_tons="00100",
+            actual_tons="00100",
+            freight_revenue="000023475",
+            expanded_carloads="000005",
+            expanded_freight_revenue="00000117375",
+            interchange_state_1="ND",
+        )
+        assert len(line) == 247
+        rec = source._parse_record(line, reference_year=2024)
+        assert rec is not None
+        assert rec.snapshot_date == date(2018, 4, 11)
+        assert rec.stcc == "48110"
+        assert rec.freight_revenue == 23475.0
+        assert rec.expanded_carloads == 5
+        assert rec.interchange_states == "ND"
+
+    def test_parse_record_too_short_returns_none(self, source: STBWaybillSource) -> None:
+        assert source._parse_record(b"short", reference_year=2024) is None
+
+    def test_waybill_year_written(self, config: PipelineConfig) -> None:
+        source = STBWaybillSource(config)
+        assert source._waybill_year_written(2024) is False
+        (config.output_dir / "freight" / "waybill_shipments" / "year=2024").mkdir(parents=True)
+        assert source._waybill_year_written(2024) is True
+
+    @responses.activate
+    def test_resolve_latest_year_backs_off(self, source: STBWaybillSource) -> None:
+        responses.add(
+            responses.GET,
+            "https://www.stb.gov/wp-content/uploads/PublicUseWaybillSample2026.zip",
+            status=404,
+            body="not found",
+        )
+        responses.add(
+            responses.GET,
+            "https://www.stb.gov/wp-content/uploads/PublicUseWaybillSample2025.zip",
+            status=200,
+            body=b"PK",
+        )
+        assert source._resolve_latest_year(2026) == 2025
+
+    @responses.activate
+    def test_fetch_skips_when_year_already_written(self, config: PipelineConfig) -> None:
+        source = STBWaybillSource(config)
+        (config.output_dir / "freight" / "waybill_shipments" / "year=2025").mkdir(parents=True)
+        responses.add(
+            responses.GET,
+            "https://www.stb.gov/wp-content/uploads/PublicUseWaybillSample2025.zip",
+            status=200,
+            body=b"PK",
+        )
+        result = source.fetch(snapshot_date=date(2025, 6, 1))
+        assert result.success is True
+        assert result.records == []
+        assert result.metadata.get("skipped") is True
+
+    @responses.activate
+    def test_fetch_parses_zip(self, config: PipelineConfig) -> None:
+        source = STBWaybillSource(config)
+        line = _build_waybill_line(
+            waybill_date="071524",
+            accounting_period="0724",
+            carloads="0002",
+            car_ownership="R",
+            stcc="01122",
+            freight_revenue="000050000",
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("PublicUseWaybillSample2025.txt", b"firstbadline\n" + line + b"\n")
+        zip_bytes = buf.getvalue()
+
+        responses.add(
+            responses.GET,
+            "https://www.stb.gov/wp-content/uploads/PublicUseWaybillSample2025.zip",
+            status=200,
+            body=zip_bytes,
+        )
+        responses.add(
+            responses.GET,
+            "https://www.stb.gov/wp-content/uploads/PublicUseWaybillSample2025.zip",
+            status=200,
+            body=zip_bytes,
+        )
+        result = source.fetch(snapshot_date=date(2025, 6, 1))
+        assert result.success is True
+        assert result.record_count == 1
+        rec = result.records[0]
+        assert rec.snapshot_date == date(2024, 7, 15)
+        assert rec.carloads == 2
+        assert rec.freight_revenue == 50000.0
+
+
+class TestBTSTransBorderSource:
+    @pytest.fixture
+    def config(self, tmp_path: Path) -> PipelineConfig:
+        return PipelineConfig(output_dir=str(tmp_path), log_dir=str(tmp_path / "logs"))
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> BTSTransBorderSource:
+        return BTSTransBorderSource(config)
+
+    def test_parse_month_year(self, source: BTSTransBorderSource) -> None:
+        raw = "/sites/bts.dot.gov/files/transborder-raw/{}/{}.zip"
+        assert source._parse_month_year(raw.format(2026, "January2026")) == (2026, 1)
+        assert source._parse_month_year(raw.format(2024, "Jan2024")) == (2024, 1)
+        assert source._parse_month_year(raw.format(2025, "December2025")) == (2025, 12)
+        assert source._parse_month_year("/sites/bts.dot.gov/files/other/file.zip") is None
+
+    def test_select_zip_newest_without_date(self, source: BTSTransBorderSource) -> None:
+        links = [(2024, 12, "dec"), (2025, 5, "may"), (2026, 1, "jan")]
+        assert source._select_zip(links, None) == (2026, 1, "jan")
+
+    def test_select_zip_respects_snapshot_date(self, source: BTSTransBorderSource) -> None:
+        links = [(2025, 12, "dec"), (2026, 1, "jan"), (2026, 2, "feb")]
+        assert source._select_zip(links, date(2026, 2, 10)) == (2026, 2, "feb")
+        assert source._select_zip(links, date(2026, 1, 20)) == (2026, 1, "jan")
+        # No published zip predates the snapshot: fetching newer data would
+        # violate snapshot semantics.
+        assert source._select_zip(links, date(2025, 10, 1)) is None
+
+    @responses.activate
+    def test_fetch_parses_three_files(self, source: BTSTransBorderSource) -> None:
+        page_html = (
+            '<a href="/sites/bts.dot.gov/files/transborder-raw/2026/January2026.zip">Jan 2026</a>'
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(
+                "dot1_0126.csv",
+                "TRDTYPE,USASTATE,DEPE,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,"
+                "FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR\n"
+                "1,AK,0901,5,,XY,1220,42199,0,62,1,1,01,2026\n",
+            )
+            zf.writestr(
+                "dot2_0126.csv",
+                "TRDTYPE,USASTATE,COMMODITY2,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,"
+                "FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR\n"
+                "1,WA,10,6,,,1220,50000,12000,800,,X,01,2026\n",
+            )
+            zf.writestr(
+                "dot3_0126.csv",
+                "TRDTYPE,DEPE,COMMODITY2,DISAGMOT,COUNTRY,VALUE,SHIPWT,"
+                "FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR\n"
+                "2,0910,28,1,2010,22052,0,10,1,1,01,2026\n",
+            )
+        zip_bytes = buf.getvalue()
+
+        responses.add(
+            responses.GET,
+            "https://www.bts.gov/topics/transborder-raw-data",
+            status=200,
+            body=page_html,
+        )
+        responses.add(
+            responses.GET,
+            "https://www.bts.gov/sites/bts.dot.gov/files/transborder-raw/2026/January2026.zip",
+            status=200,
+            body=zip_bytes,
+        )
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 3
+        by_file = {r.source_file: r for r in result.records}
+        assert by_file["dot1"].mode == "truck"
+        assert by_file["dot2"].commodity_2digit == "10"
+        assert by_file["dot3"].trade_type == "export"
+        assert by_file["dot1"].country == "CA"
+        assert all(r.snapshot_date == date(2026, 1, 31) for r in result.records)
+
+    @responses.activate
+    def test_fetch_fails_cleanly_without_links(self, source: BTSTransBorderSource) -> None:
+        responses.add(
+            responses.GET,
+            "https://www.bts.gov/topics/transborder-raw-data",
+            status=200,
+            body="<html>no zips here</html>",
+        )
+        result = source.fetch()
+        assert result.success is False
+        assert result.error is not None
+
+
+class TestAARWeeklyTrafficSource:
+    @pytest.fixture
+    def config(self, tmp_path: Path) -> PipelineConfig:
+        return PipelineConfig(output_dir=str(tmp_path), log_dir=str(tmp_path / "logs"))
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> AARWeeklyTrafficSource:
+        return AARWeeklyTrafficSource(config)
+
+    def test_parse_aar_page_text(self) -> None:
+        text = (
+            "U.S. Rail Traffic1\n"
+            "Week 31, 2026 \u2013 Ended August 8, 2026\n"
+            "This Week\nYear-To-Date\nCars\nvs 2025\nCumulative\nAvg/wk2\nvs 2025\n"
+            "Total Carloads\n231,268\n1.8%\n7,042,764\n227,186\n2.7%\n"
+            "Coal\n57,976\n-6.1%\n1,761,694\n56,829\n-1.8%\n"
+            "Total Traffic\n526,624\n3.0%\n15,756,335\n508,269\n3.3%\n"
+            "1 Excludes U.S. operations of CPKC, CN and GMXT.\n"
+            "2 Average per week figures may not sum to totals "
+            "as a result of independent rounding.\n"
+            "Trends, 2026 vs 2025\n"
+        )
+        rows = parse_aar_page(text)
+        assert len(rows) == 3
+        assert rows[0]["region"] == "US"
+        assert rows[0]["category"] == "Total Carloads"
+        assert rows[0]["this_week_cars"] == "231268"
+        assert rows[0]["this_week_yoy_pct"] == "1.8%"
+        assert rows[1]["category"] == "Coal"
+        assert rows[1]["this_week_cars"] == "57976"
+        assert rows[1]["ytd_yoy_pct"] == "-1.8%"
+
+    def test_parse_aar_page_rejects_garbage(self) -> None:
+        assert parse_aar_page("no title or rows here") == []
+
+    def test_fixture_pdf_parses_all_four_regions(self) -> None:
+        import fitz
+
+        with fitz.open(FIXTURES / "aar_weekly_2026_08_12.pdf") as doc:
+            rows: list[dict] = []
+            for page in doc:
+                if page.number >= 4:
+                    break
+                rows += parse_aar_page(page.get_text())
+        assert len(rows) == 52
+        regions = {r["region"] for r in rows}
+        assert regions == {"US", "Canada", "Mexico", "North America"}
+
+    @responses.activate
+    def test_fetch_parses_live_shape(self, source: AARWeeklyTrafficSource) -> None:
+        feed = (
+            "<rss><channel>"
+            "<item><title>Weekly Rail Traffic for the Week Ending August 8, 2026</title>"
+            "<link>https://www.aar.org/news/aar-reports-weekly-rail-traffic-for-the-week-ending-august-8-2026/</link>"
+            "</item>"
+            "</channel></rss>"
+        )
+        release_html = (
+            '<html><a href="https://www.aar.org/wp-content/uploads/2026/08/2026-08-12-railtraffic.pdf">'
+            "download</a></html>"
+        )
+        pdf_bytes = (FIXTURES / "aar_weekly_2026_08_12.pdf").read_bytes()
+
+        responses.add(
+            responses.GET,
+            "https://www.aar.org/aar_news/weekly-rail-traffic-data/feed/",
+            status=200,
+            body=feed,
+        )
+        responses.add(
+            responses.GET,
+            "https://www.aar.org/news/aar-reports-weekly-rail-traffic-for-the-week-ending-august-8-2026/",
+            status=200,
+            body=release_html,
+        )
+        responses.add(
+            responses.GET,
+            "https://www.aar.org/wp-content/uploads/2026/08/2026-08-12-railtraffic.pdf",
+            status=200,
+            body=pdf_bytes,
+        )
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 52
+        assert result.metadata["pdf_url"].endswith("railtraffic.pdf")
+        assert all(r.snapshot_date == date(2026, 8, 8) for r in result.records)

@@ -13,6 +13,8 @@ from freight_rail_pipeline.models.schemas import (
     OceanFreightRateBatch,
     RailCarloading,
     RailCarloadingBatch,
+    WaybillShipment,
+    WaybillShipmentBatch,
 )
 from freight_rail_pipeline.storage import StorageWriter
 
@@ -172,3 +174,38 @@ class TestStorageWriter:
         ])
         with pytest.raises(ValueError, match="Unknown table"):
             writer._write_table("no_such_table", batch.records, dt=date(2026, 7, 15))
+
+    def test_year_partition_merges_snapshots_in_same_year(self) -> None:
+        # STB waybill regression: snapshots carry per-shipment waybill dates, so
+        # many groups collapse into one year= partition. The writer used to emit
+        # each group to the same year=YYYY/<table>.parquet, so every write
+        # overwrote the previous one and only the last group survived (2.77k of
+        # 2.17M rows made it to disk). Now all snapshots in a year merge into a
+        # single file.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        def waybill(dt: date, stcc: str) -> WaybillShipment:
+            return WaybillShipment(
+                snapshot_date=dt,
+                accounting_period="03/24",
+                carloads=1,
+                stcc=stcc,
+            )
+
+        batch = WaybillShipmentBatch(records=[
+            waybill(date(2024, 1, 10), "01121"),
+            waybill(date(2024, 5, 20), "01411"),
+            waybill(date(2024, 12, 5), "01122"),
+        ])
+        count = writer.write_waybills(batch, dt=date(2026, 7, 15))
+        assert count == 3
+
+        files = list(self._test_dir.rglob("waybill_shipments.parquet"))
+        assert len(files) == 1, "one merged file per year partition"
+        assert "year=2024" in str(files[0])
+        df = pd.read_parquet(files[0])
+        assert len(df) == 3
+        assert sorted(df["stcc"]) == ["01121", "01122", "01411"]
+        # no CSV fallback for the annual table
+        assert not list(self._test_dir.rglob("waybill_shipments.csv"))
