@@ -1,7 +1,7 @@
 """Regression tests for scripts/backfill_bts_transborder_annual.py.
 
 These encode the layout quirks and registration bugs documented in
-BUG_FIXES.md (Bugs 1-5): the four BTS annual layouts, the "Copy of January
+work-notes/freight-rail-data-pipeline/BUG_FIXES.md (Bugs 1-5): the four BTS annual layouts, the "Copy of January
 2008" dedup, the dot1/dot2/dot3 key format, skipping redundant inner zips,
 tolerating corrupt inner zips, and the legacy 2016-08 member naming.
 """

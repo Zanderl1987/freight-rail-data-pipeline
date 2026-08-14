@@ -183,7 +183,7 @@ def _build_registry(zf: zipfile.ZipFile) -> tuple[
     Handles all four BTS layouts (folder, flat, zip-of-zips, and the legacy
     2016-08 `TransBorder_...csv` naming). Returns (monthly, ytd, corrupt).
     Owners are the outer annual (folder/flat) or an inner month zip (2017's
-    zip-of-zips). See BUG_FIXES.md for the layout quirks this encodes.
+    zip-of-zips). See work-notes/freight-rail-data-pipeline/BUG_FIXES.md for the layout quirks this encodes.
     """
     monthly: dict[tuple[int, int], dict[str, tuple[str, zipfile.ZipFile]]] = {}
     ytd: dict[tuple[int, int], dict[str, tuple[str, zipfile.ZipFile]]] = {}
