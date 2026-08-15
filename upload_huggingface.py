@@ -73,6 +73,17 @@ import pandas as pd
 df = pd.read_parquet("path/to/parquet/file.parquet")
 ```
 
+## Engineering & data quality
+
+- **140 tests at 76% line coverage**, run on every push/PR via GitHub Actions (CI badge
+  on the repo). Source adapters are tested against recorded fixtures — including the AAR
+  weekly press-release PDF parser — so a source-format regression shows up in CI instead
+  of silently landing as a malformed table.
+- **Ingest-time dedup**: reruns against the same partition overwrite the file, but a
+  history fetch that runs on multiple ingestion dates would otherwise duplicate every
+  record. Rows are deduplicated on record identity (all columns except `ingested_at`),
+  keeping the newest ingest.
+
 ## Build Info
 
 - **Generated**: {generated_date}
@@ -202,7 +213,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload freight-rail data to HuggingFace")
     parser.add_argument("--repo-name", default="freight-rail-data-pipeline", help="HF repo name")
-    parser.add_argument("--owner", default="Zanderl1987", help="HF user/org that owns the dataset")
+    parser.add_argument("--owner", default="ZanderL1337", help="HF user/org that owns the dataset")
     parser.add_argument("--private", action="store_true", help="Make dataset private")
     args = parser.parse_args()
     main(repo_name=args.repo_name, private=args.private, owner=args.owner)
