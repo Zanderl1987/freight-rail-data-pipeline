@@ -1,9 +1,10 @@
 """Regression tests for scripts/backfill_bts_transborder_annual.py.
 
 These encode the layout quirks and registration bugs documented in
-work-notes/freight-rail-data-pipeline/BUG_FIXES.md (Bugs 1-5): the four BTS annual layouts, the "Copy of January
-2008" dedup, the dot1/dot2/dot3 key format, skipping redundant inner zips,
-tolerating corrupt inner zips, and the legacy 2016-08 member naming.
+work-notes/freight-rail-data-pipeline/BUG_FIXES.md (Bugs 1-5): the four BTS
+annual layouts, the "Copy of January 2008" dedup, the dot1/dot2/dot3 key
+format, skipping redundant inner zips, tolerating corrupt inner zips, and
+the legacy 2016-08 member naming.
 """
 from __future__ import annotations
 
@@ -23,9 +24,9 @@ sys.modules["backfill_bts_transborder_annual"] = _mod
 assert _spec.loader is not None
 _spec.loader.exec_module(_mod)
 
-DOT1_HEADER = "TRDTYPE,USASTATE,DEPE,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"
-DOT2_HEADER = "TRDTYPE,USASTATE,COMMODITY2,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"
-DOT3_HEADER = "TRDTYPE,DEPE,COMMODITY2,DISAGMOT,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"
+DOT1_HEADER = "TRDTYPE,USASTATE,DEPE,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"  # noqa: E501
+DOT2_HEADER = "TRDTYPE,USASTATE,COMMODITY2,DISAGMOT,MEXSTATE,CANPROV,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"  # noqa: E501
+DOT3_HEADER = "TRDTYPE,DEPE,COMMODITY2,DISAGMOT,COUNTRY,VALUE,SHIPWT,FREIGHT_CHARGES,DF,CONTCODE,MONTH,YEAR"  # noqa: E501
 
 
 def _make_zip(members: dict[str, bytes]) -> zipfile.ZipFile:
