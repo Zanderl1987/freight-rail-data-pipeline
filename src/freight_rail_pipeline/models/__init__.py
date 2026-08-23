@@ -21,6 +21,8 @@ from .schemas import (
     RailTariffRateBatch,
     TransBorderFreight,
     TransBorderFreightBatch,
+    TransBorderLegacy,
+    TransBorderLegacyBatch,
     WaybillShipment,
     WaybillShipmentBatch,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "WaybillShipmentBatch",
     "TransBorderFreight",
     "TransBorderFreightBatch",
+    "TransBorderLegacy",
+    "TransBorderLegacyBatch",
     "AARWeeklyTraffic",
     "AARWeeklyTrafficBatch",
     "PipelineRunSummary",

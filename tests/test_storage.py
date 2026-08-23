@@ -13,6 +13,8 @@ from freight_rail_pipeline.models.schemas import (
     OceanFreightRateBatch,
     RailCarloading,
     RailCarloadingBatch,
+    TransBorderLegacy,
+    TransBorderLegacyBatch,
     WaybillShipment,
     WaybillShipmentBatch,
 )
@@ -233,6 +235,36 @@ class TestStorageWriter:
         assert sorted(df["stcc"]) == ["01121", "01122", "01411"]
         # no CSV fallback for the annual table
         assert not list(self._test_dir.rglob("waybill_shipments.csv"))
+
+    def test_legacy_transborder_skips_the_csv_fallback(self) -> None:
+        # The 1993-2006 DBF backfill writes 168 month partitions, each one
+        # re-serializing the full JSON raw_record column. An uncompressed CSV
+        # twin per month roughly doubles the store for no query benefit --
+        # same reasoning as write_waybills.
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+
+        batch = TransBorderLegacyBatch(
+            records=[
+                TransBorderLegacy(
+                    snapshot_date=date(1995, 1, 31),
+                    year=1995,
+                    month=1,
+                    direction="export",
+                    partner="MX",
+                    emphasis="commodity",
+                    source_table="d3a",
+                    source_file="D3AJAN95.DBF",
+                    statmoyr="0195",
+                    raw_record={"DISAGMOT": "6", "VALUE": "24077"},
+                )
+            ]
+        )
+        assert writer.write_transborder_legacy(batch) == 1
+
+        parquets = list(self._test_dir.rglob("transborder_legacy_1993_2006.parquet"))
+        assert len(parquets) == 1
+        assert not list(self._test_dir.rglob("transborder_legacy_1993_2006.csv"))
 
     def test_year_partition_merges_across_runs(self) -> None:
         # Cross-run variant of the waybill merge: a backfill run writes records

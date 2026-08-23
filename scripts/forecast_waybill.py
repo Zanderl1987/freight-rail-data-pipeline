@@ -4,17 +4,43 @@ rail tons by commodity group?
 Data: STB Public Use Waybill Sample (stratified annual sample of rail
 shipments, 1996-2024). We aggregate the expansion-weighted population
 estimate `expanded_tons` to a MONTHLY panel at the STCC-2 commodity-group
-grain (34 groups x 24 years of clean monthly coverage, 2000-2013 + 2015-2024;
-2014 and pre-2000 are thin/noisy and dropped).
+grain (30 groups x 24 years of clean monthly coverage, 2000-2013 + 2015-2024).
+There is no 2014 sample at all, so the year=2014 partition holds only
+backdated spillover from later samples; pre-2000 is thin. Both are dropped,
+which means the monthly grid is NOT contiguous -- see `_lag_by_date`.
 
 Task: for each commodity group, forecast NEXT-MONTH tons using only
-information available up to the previous month (strict point-in-time:
-walk-forward, no look-ahead).
+REFERENCE-PERIOD-prior information: walk-forward, train on every month
+strictly before the target month.
 
-Honest framing (per the project's signal-eval discipline):
+WHAT THIS DOES AND DOES NOT MEASURE (per the project's signal-eval
+discipline, whose first rule is to join on the date information became
+public, not the date it describes):
+
+  The walk-forward split is correct in REFERENCE time and NOT in KNOWLEDGE
+  time. The waybill sample is published annually, well after its reference
+  year -- the 2020 sample was released 2022-02-02, ~13 months after the year
+  ended (stb.gov/news-communications/latest-news/pr-22-06/). So every feature
+  for a target month t (lag_1 .. lag_12, and the entire persistence and
+  seasonal-naive baselines) is drawn from months whose figures had not been
+  published when month t began; the shortfall runs from roughly 13 to 25
+  months depending on where t falls in its year.
+
+  Consequently these MAPE/RMSE figures are NOT reproducible by a forecaster
+  operating live, and the improvement-vs-baseline numbers must not be read as
+  tradeable or operational skill. What they DO measure is a well-posed
+  question in its own right: given a complete monthly history of a commodity
+  group, how much structure beyond seasonality and persistence is there in
+  the next month? A live-realizable version would need an explicit
+  availability lag on every feature (data through reference year Y-2 only),
+  which is a materially harder and different experiment.
+
+Framing of the comparison itself:
   - Baselines are the bar, not zero: SEASONAL NAIVE (same month last year)
     and PERSISTENCE (last month). Freight volume is seasonal and persistent;
-    a model must beat THOSE to be useful, not just beat a mean.
+    a model must beat THOSE to be useful, not just beat a mean. Both
+    baselines are subject to the same publication lag as the model, so the
+    comparison between them is fair even though the level is not live.
   - Expanding-window walk-forward over 2019-2024 (6 test years, 72 test
     months per group): train on every month strictly before the target.
   - Report MAPE and RMSE per group and overall, plus improvement vs the
@@ -48,6 +74,29 @@ LAGS = [1, 2, 3, 6, 12]
 MIN_TRAIN_MONTHS = 60  # 5 years of monthly history before first forecast
 
 
+def panel_query(drop_years: set[int] | None = None) -> str:
+    """The monthly-panel aggregation SQL.
+
+    The dropped years are interpolated from DROP_YEARS rather than written as
+    literals: a hardcoded list silently diverges from the constant, leaving the
+    grid full of all-NaN rows and killing the run on the gaps check with a
+    misleading "unexpected gap" message.
+    """
+    years = sorted(DROP_YEARS if drop_years is None else drop_years)
+    drop_list = ", ".join(str(y) for y in years)
+    return f"""
+        select substr(stcc, 1, 2)                                  as stcc2,
+               year                                               as year,
+               cast(substr(accounting_period, 1, 2) as integer)   as month,
+               sum(expanded_tons) / 1e6                           as tons_mt
+        from w
+        where year not in ({drop_list})
+          and substr(stcc, 1, 2) not in ('00')
+          and cast(substr(accounting_period, 1, 2) as integer) between 1 and 12
+        group by 1, 2, 3
+        """  # noqa: S608 - module constant, not user input
+
+
 def load_panel() -> pd.DataFrame:
     """Aggregate expanded tons to a monthly (stcc2, date) panel in Mt."""
     files = [str(p).replace("\\", "/") for p in DATA_DIR.glob("year=*/*.parquet")]
@@ -56,19 +105,7 @@ def load_panel() -> pd.DataFrame:
     con.execute(
         f"create view w as select * from read_parquet([{files_join}])"  # noqa: S608 - local glob, not user input
     )
-    df = con.execute(
-        """
-        select substr(stcc, 1, 2)                                   as stcc2,
-               year                                               as year,
-               cast(substr(accounting_period, 1, 2) as integer)   as month,
-               sum(expanded_tons) / 1e6                           as tons_mt
-        from w
-        where year not in (1996, 1997, 1998, 1999, 2014)
-          and substr(stcc, 1, 2) not in ('00')
-          and cast(substr(accounting_period, 1, 2) as integer) between 1 and 12
-        group by 1, 2, 3
-        """
-    ).df()
+    df = con.execute(panel_query()).df()
     df["date"] = pd.to_datetime(dict(year=df["year"], month=df["month"], day=1))
     # Full monthly grid per group, so gaps surface as NaN (they should not
     # exist in the clean years).
@@ -98,24 +135,48 @@ def load_panel() -> pd.DataFrame:
     return panel
 
 
+def _lag_by_date(
+    df: pd.DataFrame,
+    group_col: str,
+    target_col: str,
+    date_col: str,
+    lag: int,
+    name: str,
+) -> pd.DataFrame:
+    """Join the value from exactly `lag` calendar months earlier.
+
+    A positional `shift(lag)` assumes contiguous months, but DROP_YEARS
+    deliberately removes 2014 from the grid, so the panel jumps 2013-12 ->
+    2015-01. Shifting there hands Jan-2015 the Dec-2013 value -- a 13-month
+    lag mislabeled as a 1-month lag, and 2013 figures presented as the
+    seasonal reference for 2015. Matching on the actual date yields NaN when
+    the source month is absent, which is the truth: there is no observation.
+    """
+    src = df[[group_col, date_col, target_col]].rename(columns={target_col: name})
+    src = src.assign(**{date_col: src[date_col] + pd.DateOffset(months=lag)})
+    return df.merge(src, on=[group_col, date_col], how="left")
+
+
 def add_lags(
     df: pd.DataFrame, group_col: str, target_col: str, date_col: str, lags: list[int]
 ) -> pd.DataFrame:
-    """Add lag features per group. Requires rows sorted by (group, date)."""
+    """Add lag features per group, keyed on calendar date (see _lag_by_date)."""
     out = df.copy()
     for lag in lags:
-        out[f"lag_{lag}"] = out.groupby(group_col)[target_col].shift(lag)
+        out = _lag_by_date(out, group_col, target_col, date_col, lag, f"lag_{lag}")
     out["month_of_year"] = out[date_col].dt.month
     out["year"] = out[date_col].dt.year
     return out
 
 
 def baseline_predictions(df: pd.DataFrame) -> pd.DataFrame:
-    """Seasonal-naive (same month, prior year) and persistence (last month)."""
-    g = df.groupby("stcc2", sort=False)["tons_mt"]
-    df["seasonal_naive"] = g.shift(12)
-    df["persistence"] = g.shift(1)
-    return df
+    """Seasonal-naive (same month, prior year) and persistence (last month).
+
+    Date-keyed for the same reason as the lags: a positional shift would make
+    Dec-2013 the "previous month" of Jan-2015.
+    """
+    out = _lag_by_date(df, "stcc2", "tons_mt", "date", 12, "seasonal_naive")
+    return _lag_by_date(out, "stcc2", "tons_mt", "date", 1, "persistence")
 
 
 def walk_forward(df: pd.DataFrame) -> pd.DataFrame:
@@ -171,13 +232,34 @@ def walk_forward(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _comparable(actual: np.ndarray, pred: np.ndarray, positive_only: bool) -> np.ndarray:
+    """Rows where both series are finite (and the actual is usable as a MAPE
+    denominator). Without the finite check a single NaN prediction turns RMSE
+    into a silent NaN in the output CSV instead of an error."""
+    ok = np.isfinite(actual) & np.isfinite(pred)
+    if positive_only:
+        ok &= actual > 0
+    return ok
+
+
+def n_used(actual: np.ndarray, pred: np.ndarray, *, positive_only: bool) -> int:
+    """Rows a metric actually scored. MAPE and RMSE score different row sets,
+    so they must not be reported under one shared `n`."""
+    return int(_comparable(actual, pred, positive_only).sum())
+
+
 def mape(actual: np.ndarray, pred: np.ndarray) -> float:
-    mask = actual > 0
-    return float(np.mean(np.abs((actual[mask] - pred[mask]) / actual[mask])) * 100)
+    ok = _comparable(actual, pred, positive_only=True)
+    if not ok.any():
+        return float("nan")
+    return float(np.mean(np.abs((actual[ok] - pred[ok]) / actual[ok])) * 100)
 
 
 def rmse(actual: np.ndarray, pred: np.ndarray) -> float:
-    return float(np.sqrt(np.mean((actual - pred) ** 2)))
+    ok = _comparable(actual, pred, positive_only=False)
+    if not ok.any():
+        return float("nan")
+    return float(np.sqrt(np.mean((actual[ok] - pred[ok]) ** 2)))
 
 
 def main() -> int:
@@ -204,13 +286,19 @@ def main() -> int:
         "baseline_persistence": "persistence",
     }
     metrics = []
+    actual = fc["actual"].to_numpy()
     for col, name in cols.items():
+        pred = fc[col].to_numpy()
         metrics.append(
             {
                 "model": name,
-                "mape_pct": mape(fc["actual"].to_numpy(), fc[col].to_numpy()),
-                "rmse_mt": rmse(fc["actual"].to_numpy(), fc[col].to_numpy()),
-                "n": len(fc),
+                "mape_pct": mape(actual, pred),
+                "rmse_mt": rmse(actual, pred),
+                # MAPE drops non-positive actuals, RMSE keeps them, and both
+                # drop non-finite rows -- so they are scored over different
+                # row sets and cannot share one `n`.
+                "n_mape": n_used(actual, pred, positive_only=True),
+                "n_rmse": n_used(actual, pred, positive_only=False),
             }
         )
     mdf = pd.DataFrame(metrics).sort_values("mape_pct")
@@ -232,7 +320,12 @@ def main() -> int:
                     "mape_persist": mape(
                         g["actual"].to_numpy(), g["baseline_persistence"].to_numpy()
                     ),
-                    "n": len(g),
+                    "n_forecasts": len(g),
+                    "n_mape": n_used(
+                        g["actual"].to_numpy(),
+                        g["pred_xgb"].to_numpy(),
+                        positive_only=True,
+                    ),
                 }
             ),
             include_groups=False,
@@ -241,7 +334,7 @@ def main() -> int:
     )
     print(per_group.round(2).to_string(index=False))
 
-    agg = per_group.drop(columns=["stcc2", "n"]).mean()
+    agg = per_group.drop(columns=["stcc2", "n_forecasts", "n_mape"]).mean()
     print("\n=== Mean per-group MAPE (equal-weight across groups) ===")
     print(agg.round(2).to_string())
 

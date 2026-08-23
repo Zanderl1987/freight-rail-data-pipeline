@@ -386,6 +386,78 @@ class TransBorderFreightBatch(BaseModel):
         return len(self.records)
 
 
+class TransBorderLegacy(BaseModel):
+    """One DBF record from BTS TransBorder's pre-CSV era (1993-2006).
+
+    The annual zips ship per-month dBase tables named by a table family that
+    encodes direction/partner/emphasis -- d03/d3a/d3b (export MX commodity),
+    d04/d4a/d4b (export CA commodity), d05/d5a/d5b/d5s (export MX geography),
+    d06/d6a/d6b (export CA geography), d09/d10/d11/d12 (imports), and the
+    2004-2006 av1-av12 air/vessel tables. Columns drift heavily across the
+    era (region-grain 1993/early-1994 with SCH_B_GRP/MEXREGION/USREGION/
+    DISTGROUP vs state-grain 1994+, SCH_B exports vs TSUSA/HTS imports, VALUE
+    vs VALU), so the stable core is typed and the full native row is kept in
+    `raw_record`. `revision` marks r* files that supersede the D* file for
+    the same month; `supplement` marks X* files that add previously
+    unreported rows. Unlike TransBorderFreight (2007+, one row per CSV line,
+    three overlapping dot1/dot2/dot3 views), this preserves the DBF grain
+    one-for-one -- do not sum across emphasis/source_table."""
+
+    source: str = Field(default="bts_transborder")
+    snapshot_date: date = Field(..., description="Month-end date of the STATMOYR period")
+    year: int = Field(...)
+    month: int = Field(...)
+    direction: str = Field(..., description="'export' or 'import'")
+    partner: str = Field(..., description="Trading partner: MX or CA")
+    emphasis: str = Field(..., description="'commodity' or 'geography'")
+    source_table: str = Field(
+        ..., description="DBF table family id, e.g. 'd3a', 'd09', 'av1'"
+    )
+    source_file: str = Field(..., description="Original DBF basename, e.g. 'D3AJUL94.DBF'")
+    statmoyr: str = Field(..., description="Raw period code, e.g. '0493' or '200601'")
+    disagg_mode: int | None = Field(default=None, description="Raw DISAGMOT code")
+    mode: str = Field(default="unknown", description="Mode label, e.g. 'rail'")
+    country: str | None = Field(default=None, description="CA or MX (Census code mapped)")
+    value_usd: float | None = Field(default=None, ge=0)
+    charges_usd: float | None = Field(default=None, ge=0, description="CHARGES (imports)")
+    freight_usd: float | None = Field(default=None, ge=0, description="FREIGHT (CA exports)")
+    ship_weight: float | None = Field(default=None, ge=0, description="SHIPWT")
+    aggregate_count: int | None = Field(
+        default=None, ge=0, description="COUNT field (1993-1996 only)"
+    )
+    us_state: str | None = Field(
+        default=None, description="DESTATE/ORSTATE/EXSTATE/USSTATE (direction disambiguates)"
+    )
+    mexico_state: str | None = Field(default=None, description="MEXSTATE code")
+    canada_province: str | None = Field(default=None, description="PROV code")
+    district_port: str | None = Field(default=None, description="DEPE customs district/port")
+    commodity_code: str | None = Field(
+        default=None,
+        description="SCH_B/TSUSA/HTS/SCH_B_GRP/TSUSA_GRP code from this table's coding system",
+    )
+    distribution_flag: str | None = Field(default=None, description="BTS 'DF' raw flag")
+    ntar: str | None = Field(default=None, description="NTAR code (d5b/d6b only)")
+    contcode: str | None = Field(default=None, description="CONTCODE container flag")
+    mexregion: str | None = Field(default=None, description="MEXREGION (1993/early-1994)")
+    usregion: str | None = Field(default=None, description="USREGION (1993/early-1994)")
+    distgroup: str | None = Field(default=None, description="DISTGROUP (1993/early-1994)")
+    revision: bool = Field(default=False, description="r* file supersedes D* for same month")
+    supplement: bool = Field(
+        default=False, description="X* file adds previously unreported rows"
+    )
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class TransBorderLegacyBatch(BaseModel):
+    records: list[TransBorderLegacy]
+    source: str = "bts_transborder"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class AARWeeklyTraffic(BaseModel):
     """One row from an AAR weekly rail-traffic press-release PDF: a category
     (Total Carloads, a commodity group, Total Intermodal Units, or Total

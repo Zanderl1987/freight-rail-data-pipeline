@@ -23,6 +23,7 @@ from .models.schemas import (
     RailServiceMetricBatch,
     RailTariffRateBatch,
     TransBorderFreightBatch,
+    TransBorderLegacyBatch,
     WaybillShipmentBatch,
 )
 
@@ -251,6 +252,43 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "transborder_legacy_1993_2006": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("year", pa.int64()),
+                pa.field("month", pa.int64()),
+                pa.field("direction", pa.utf8()),
+                pa.field("partner", pa.utf8()),
+                pa.field("emphasis", pa.utf8()),
+                pa.field("source_table", pa.utf8()),
+                pa.field("source_file", pa.utf8()),
+                pa.field("statmoyr", pa.utf8()),
+                pa.field("disagg_mode", pa.int64(), nullable=True),
+                pa.field("mode", pa.utf8()),
+                pa.field("country", pa.utf8(), nullable=True),
+                pa.field("value_usd", pa.float64(), nullable=True),
+                pa.field("charges_usd", pa.float64(), nullable=True),
+                pa.field("freight_usd", pa.float64(), nullable=True),
+                pa.field("ship_weight", pa.float64(), nullable=True),
+                pa.field("aggregate_count", pa.int64(), nullable=True),
+                pa.field("us_state", pa.utf8(), nullable=True),
+                pa.field("mexico_state", pa.utf8(), nullable=True),
+                pa.field("canada_province", pa.utf8(), nullable=True),
+                pa.field("district_port", pa.utf8(), nullable=True),
+                pa.field("commodity_code", pa.utf8(), nullable=True),
+                pa.field("distribution_flag", pa.utf8(), nullable=True),
+                pa.field("ntar", pa.utf8(), nullable=True),
+                pa.field("contcode", pa.utf8(), nullable=True),
+                pa.field("mexregion", pa.utf8(), nullable=True),
+                pa.field("usregion", pa.utf8(), nullable=True),
+                pa.field("distgroup", pa.utf8(), nullable=True),
+                pa.field("revision", pa.bool_()),
+                pa.field("supplement", pa.bool_()),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
         "aar_weekly_traffic": pa.schema(
             [
                 pa.field("source", pa.utf8()),
@@ -376,6 +414,20 @@ class StorageWriter:
         if not batch.records:
             return 0
         return self._write_table("transborder_freight", batch.records, dt)
+
+    def write_transborder_legacy(
+        self,
+        batch: TransBorderLegacyBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        # 168 month partitions from the DBF backfill, each re-serializing the
+        # full JSON raw_record column: an uncompressed CSV twin per month
+        # roughly doubles the store for no query benefit (cf. write_waybills).
+        return self._write_table(
+            "transborder_legacy_1993_2006", batch.records, dt, write_csv=False
+        )
 
     def write_aar_weekly(
         self,
