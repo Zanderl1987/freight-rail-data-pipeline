@@ -26,7 +26,7 @@ dependencies = [
     "requests>=2.31",
     "pydantic>=2.5",
     "pyarrow>=14.0",
-    "pandas>=2.2",  # scripts/forecast_waybill.py uses groupby.apply(include_groups=)
+    "pandas>=2.2", # scripts/forecast_waybill.py uses groupby.apply(include_groups=)
     "sodapy>=2.2",
     "python-dotenv>=1.0",
     "click>=8.1",
@@ -36,6 +36,7 @@ dependencies = [
     "httpx>=0.26",
     "tenacity>=8.2",
     "pymupdf>=1.24",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]

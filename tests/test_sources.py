@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 import responses
 
@@ -23,6 +24,7 @@ from freight_rail_pipeline.sources.bts_transborder import (
     select_monthly_dot_files,
 )
 from freight_rail_pipeline.sources.eurostat_rail import DATASET_ID, EurostatRailSource
+from freight_rail_pipeline.sources.fmc_containerized import FMCContainerizedSource
 from freight_rail_pipeline.sources.fmcsa_carrier_census import (
     SELECT_COLUMNS,
     FMCSACarrierCensusSource,
@@ -35,6 +37,7 @@ from freight_rail_pipeline.sources.stb_waybill import (
     STBWaybillSource,
 )
 from freight_rail_pipeline.sources.usda_agtransport import USDAgTransportSource
+from freight_rail_pipeline.sources.usda_gtr import USDAGrainTransportSource
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1152,3 +1155,259 @@ class TestAARWeeklyTrafficSource:
         assert result.record_count == 52
         assert result.metadata["pdf_url"].endswith("railtraffic.pdf")
         assert all(r.snapshot_date == date(2026, 8, 8) for r in result.records)
+
+
+class TestUSDAGrainTransportSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> USDAGrainTransportSource:
+        return USDAGrainTransportSource(config)
+
+    @patch("freight_rail_pipeline.sources.usda_gtr.Socrata")
+    def test_fetch_normalizes_all_series(
+        self, mock_socrata: MagicMock, source: USDAGrainTransportSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+
+        fixtures = {
+            "7spn-fbua": [
+                {
+                    "date": "2026-08-18T00:00:00.000",
+                    "river_system_location": "La Crosse - Minneapolis",
+                    "price_per_ton": "47.3535",
+                }
+            ],
+            "deqi-uken": [
+                {
+                    "date": "2026-08-18T00:00:00.000",
+                    "location": "Twin Cities",
+                    "rate": "765",
+                }
+            ],
+            "dtp5-fwp8": [
+                {
+                    "date": "2026-07-01T00:00:00.000",
+                    "container_size": "20ft container",
+                    "origin": "U.S. Mid West (Chicago)",
+                    "destination_country": "Shanghai",
+                    "rate": "1551",
+                }
+            ],
+            "ehs5-yac3": [
+                {
+                    "date": "2026-07-01T00:00:00.000",
+                    "gulf_to_japan": "68.95",
+                    "pnw_to_japan": "35.95",
+                    "gulf_pnw_spread": "33",
+                }
+            ],
+            "fxkn-2w9c": [
+                {
+                    "yearquarter": "2026Q1",
+                    "region": "National",
+                    "rate_mile_trukload": "6.83",
+                }
+            ],
+            "n4pw-9ygw": [
+                {
+                    "date": "2026-08-15T00:00:00.000",
+                    "commodity": "Corn",
+                    "lock": "IL La Grange",
+                    "tons": "133600",
+                }
+            ],
+            "sruw-w49i": [
+                {
+                    "date": "2026-08-20T00:00:00.000",
+                    "port": "New Orleans",
+                    "grain": "Corn",
+                    "mt": "12345.6",
+                }
+            ],
+        }
+
+        def get_side_effect(resource_id: str, **kwargs: object) -> list[dict[str, object]]:
+            if kwargs.get("offset", 0):
+                return []
+            return fixtures.get(resource_id, [])
+
+        mock_client.get.side_effect = get_side_effect
+
+        result = source.fetch(snapshot_date=None)
+        assert result.success is True
+        # 7 raw rows + the vessel_rates row expands into three observations
+        assert result.record_count == 9
+        by_series = {}
+        for rec in result.records:
+            by_series.setdefault(rec.series, []).append(rec)
+        assert len(by_series) == 7
+        assert result.metadata["vessel_rates_raw"] == 1
+
+        barge = by_series["mississippi_barge_rates"][0]
+        assert barge.metric == "barge_rate_per_ton"
+        assert barge.value == pytest.approx(47.3535)
+        assert barge.units == "$ per ton"
+        assert barge.location == "La Crosse - Minneapolis"
+
+        vessel = sorted(by_series["vessel_rates"], key=lambda r: r.location or "")
+        assert [r.value for r in vessel] == pytest.approx([33.0, 68.95, 35.95])
+        assert all(r.metric == "ocean_vessel_rate" for r in vessel)
+
+        truck = by_series["quarterly_grain_truck_rates"][0]
+        assert truck.quarter == "2026Q1"
+        assert truck.units == "$ per mile"
+
+        inspections = by_series["grain_inspections"][0]
+        assert inspections.commodity == "Corn"
+        assert inspections.units == "metric tons"
+        assert all(r.source == "usda_gtr" for r in result.records)
+        assert all(r.resource_id for r in result.records)
+
+    @patch("freight_rail_pipeline.sources.usda_gtr.Socrata")
+    def test_fetch_handles_empty_response(
+        self, mock_socrata: MagicMock, source: USDAGrainTransportSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = []
+
+        result = source.fetch()
+        assert result.success is True
+        assert result.record_count == 0
+
+    @patch("freight_rail_pipeline.sources.usda_gtr.Socrata")
+    def test_validate_connectivity(
+        self, mock_socrata: MagicMock, source: USDAGrainTransportSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.return_value = []
+
+        warnings = source.validate()
+        assert warnings == []
+        assert mock_client.get.call_count == len(source.config.usda_gtr_resource_ids)
+
+    @patch("freight_rail_pipeline.sources.usda_gtr.Socrata")
+    def test_validate_reports_failures(
+        self, mock_socrata: MagicMock, source: USDAGrainTransportSource
+    ) -> None:
+        mock_client = MagicMock()
+        mock_socrata.return_value = mock_client
+        mock_client.get.side_effect = RuntimeError("boom")
+
+        warnings = source.validate()
+        assert len(warnings) == len(source.config.usda_gtr_resource_ids)
+        assert "boom" in warnings[0]
+
+
+class TestFMCContainerizedSource:
+    @pytest.fixture
+    def config(self) -> PipelineConfig:
+        return PipelineConfig(output_dir="tests/_test_output", log_dir="tests/_test_output/logs")
+
+    @pytest.fixture
+    def source(self, config: PipelineConfig) -> FMCContainerizedSource:
+        return FMCContainerizedSource(config)
+
+    LANDING_PAGE = """
+    <html><body>
+    <a href="/wp-content/uploads/2026/02/CFS_2024_Data.xlsx">2024 data</a>
+    <a href="/wp-content/uploads/2026/08/CFS_2024_Data-updated.xlsx">2024 revised</a>
+    <a href="/wp-content/uploads/2026/08/CFS_2025_Data.xlsx">2025 data</a>
+    <a href="/wp-content/uploads/2026/08/other_file.xlsx">not CFS</a>
+    </body></html>
+    """
+
+    @staticmethod
+    def _workbook_bytes() -> bytes:
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            pd.DataFrame({"info": ["Federal Maritime Commission CFS"]}).to_excel(
+                writer, sheet_name="Info", index=False
+            )
+            ports = pd.DataFrame(
+                [
+                    {
+                        "Quarter, Year": "Q1 2024",
+                        "Port Name": "Anchorage, Alaska",
+                        "Laden Exports": 3548,
+                        "Empty Exports": 132,
+                        "Laden Imports": 12,
+                        "Empty Imports": 5928,
+                        "Export Tonnage": 49266,
+                        "Import Tonnage": 5963,
+                    },
+                    {
+                        "Quarter, Year": "Q2 2024",
+                        "Port Name": "Boston, Massachusetts",
+                        "Laden Exports": None,
+                        "Empty Exports": None,
+                        "Laden Imports": None,
+                        "Empty Imports": None,
+                        "Export Tonnage": 172132,
+                        "Import Tonnage": None,
+                    },
+                ]
+            )
+            ports.to_excel(writer, sheet_name="US Ports", index=False)
+            carriers = pd.DataFrame(
+                [
+                    {
+                        "Quarter, Year": "Q1 2024",
+                        "Carrier Name": "CMACGM",
+                        "Laden Exports": 456525,
+                        "Empty Exports": 389110,
+                        "Laden Imports": 836863,
+                        "Empty Imports": 49589,
+                        "Export Tonnage": 6220849,
+                        "Import Tonnage": 7336267,
+                    },
+                    {"Quarter, Year": "not a quarter", "Carrier Name": "BAD"},
+                ]
+            )
+            carriers.to_excel(writer, sheet_name="Ocean Carriers", index=False)
+        return buf.getvalue()
+
+    def test_discover_prefers_updated_revision(self, source: FMCContainerizedSource) -> None:
+        with patch.object(source, "_get", return_value=self.LANDING_PAGE):
+            found = source._discover_workbook_urls()
+        assert set(found) == {2024, 2025}
+        assert found[2024].endswith("CFS_2024_Data-updated.xlsx")
+        assert found[2025].endswith("CFS_2025_Data.xlsx")
+
+    def test_fetch_parses_both_sheets(self, source: FMCContainerizedSource) -> None:
+        with (
+            patch.object(source, "_discover_workbook_urls", return_value={2024: "https://x/CFS_2024_Data.xlsx"}),
+            patch.object(source, "_download", return_value=self._workbook_bytes()),
+        ):
+            result = source.fetch()
+        # 2 usable port rows + 1 usable carrier row; the bad-label carrier row drops.
+        assert result.record_count == 3
+        by_entity = {(r.entity_type, r.entity_name): r for r in result.records}
+        anchorage = by_entity[("port", "Anchorage, Alaska")]
+        assert anchorage.snapshot_date == date(2024, 3, 31)
+        assert anchorage.laden_import_teu == 12
+        boston = by_entity[("port", "Boston, Massachusetts")]
+        assert boston.laden_export_teu is None
+        assert boston.export_tonnage == 172132.0
+        carrier = by_entity[("carrier", "CMACGM")]
+        assert carrier.quarter == 1
+        assert result.metadata["files"] == {"CFS_2024_Data.xlsx": 3}
+
+    def test_fetch_survives_unreadable_workbook(self, source: FMCContainerizedSource) -> None:
+        with (
+            patch.object(source, "_discover_workbook_urls", return_value={2024: "https://x/CFS_2024_Data.xlsx"}),
+            patch.object(source, "_download", return_value=b"not an xlsx"),
+        ):
+            result = source.fetch()
+        assert result.record_count == 0
+        assert result.success
+
+    def test_no_records_when_page_has_no_links(self, source: FMCContainerizedSource) -> None:
+        with patch.object(source, "_get", return_value="<html><body>nothing</body></html>"):
+            result = source.fetch()
+        assert result.record_count == 0

@@ -14,7 +14,9 @@ from .config import PipelineConfig
 from .models.schemas import (
     AARWeeklyTrafficBatch,
     EurostatRailFreightBatch,
+    FMCContainerStatsBatch,
     FreightIndicatorBatch,
+    GrainTransportObservationBatch,
     MotorCarrierCensusBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
@@ -306,6 +308,46 @@ def _schema_for_model(table_name: str) -> pa.Schema:
                 pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
             ]
         ),
+        "grain_transport": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("series", pa.utf8()),
+                pa.field("resource_id", pa.utf8()),
+                pa.field("metric", pa.utf8()),
+                pa.field("location", pa.utf8(), nullable=True),
+                pa.field("origin", pa.utf8(), nullable=True),
+                pa.field("destination", pa.utf8(), nullable=True),
+                pa.field("commodity", pa.utf8(), nullable=True),
+                pa.field("container_type", pa.utf8(), nullable=True),
+                pa.field("value", pa.float64()),
+                pa.field("units", pa.utf8(), nullable=True),
+                pa.field("week_number", pa.int64(), nullable=True),
+                pa.field("year", pa.int64(), nullable=True),
+                pa.field("quarter", pa.utf8(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
+        "fmc_containerized": pa.schema(
+            [
+                pa.field("source", pa.utf8()),
+                pa.field("snapshot_date", pa.date32()),
+                pa.field("quarter_label", pa.utf8()),
+                pa.field("year", pa.int64()),
+                pa.field("quarter", pa.int64()),
+                pa.field("entity_type", pa.utf8()),
+                pa.field("entity_name", pa.utf8()),
+                pa.field("laden_export_teu", pa.int64(), nullable=True),
+                pa.field("empty_export_teu", pa.int64(), nullable=True),
+                pa.field("laden_import_teu", pa.int64(), nullable=True),
+                pa.field("empty_import_teu", pa.int64(), nullable=True),
+                pa.field("export_tonnage", pa.float64(), nullable=True),
+                pa.field("import_tonnage", pa.float64(), nullable=True),
+                pa.field("raw_record", pa.string(), nullable=True),
+                pa.field("ingested_at", pa.timestamp("us", tz="UTC")),
+            ]
+        ),
     }
     try:
         return schemas[table_name]
@@ -437,6 +479,24 @@ class StorageWriter:
         if not batch.records:
             return 0
         return self._write_table("aar_weekly_traffic", batch.records, dt)
+
+    def write_grain_transport(
+        self,
+        batch: GrainTransportObservationBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("grain_transport", batch.records, dt)
+
+    def write_fmc_containerized(
+        self,
+        batch: FMCContainerStatsBatch,
+        dt: date | None = None,
+    ) -> int:
+        if not batch.records:
+            return 0
+        return self._write_table("fmc_containerized", batch.records, dt)
 
     def _write_table(
         self,

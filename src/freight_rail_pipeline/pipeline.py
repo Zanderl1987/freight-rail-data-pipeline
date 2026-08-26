@@ -13,7 +13,9 @@ from .logging_setup import setup_logging
 from .models.schemas import (
     AARWeeklyTrafficBatch,
     EurostatRailFreightBatch,
+    FMCContainerStatsBatch,
     FreightIndicatorBatch,
+    GrainTransportObservationBatch,
     MotorCarrierCensusBatch,
     OceanFreightRateBatch,
     PipelineRunSummary,
@@ -54,6 +56,8 @@ class FreightPipeline:
 
         self._sources: dict[str, src.BaseSource] = {
             "usda": src.USDAgTransportSource(self.config),
+            "usda_gtr": src.USDAGrainTransportSource(self.config),
+            "fmc": src.FMCContainerizedSource(self.config),
             "fbx": src.FreightosFBXSource(self.config),
             "bts": src.BTSFreightIndicatorsSource(self.config),
             "fra": src.FRASafetySource(self.config),
@@ -249,6 +253,20 @@ class FreightPipeline:
         if aw_records:
             written += self.storage.write_aar_weekly(
                 AARWeeklyTrafficBatch(records=aw_records),
+                dt=snapshot_date,
+            )
+
+        gt_records = [r for r in records if type(r).__name__ == "GrainTransportObservation"]
+        if gt_records:
+            written += self.storage.write_grain_transport(
+                GrainTransportObservationBatch(records=gt_records),
+                dt=snapshot_date,
+            )
+
+        fmc_records = [r for r in records if type(r).__name__ == "FMCContainerStats"]
+        if fmc_records:
+            written += self.storage.write_fmc_containerized(
+                FMCContainerStatsBatch(records=fmc_records),
                 dt=snapshot_date,
             )
 

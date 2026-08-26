@@ -6,6 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from freight_rail_pipeline.models.schemas import (
+    FMCContainerStats,
+    FMCContainerStatsBatch,
+    GrainTransportObservation,
+    GrainTransportObservationBatch,
     OceanFreightRate,
     OceanFreightRateBatch,
     RailCarloading,
@@ -115,3 +119,94 @@ class TestRailTariffRate:
         assert t.fuel_surcharge == 350.00
         assert t.currency == "USD"
         assert t.source == "usda_agtransport"
+
+
+class TestGrainTransportObservation:
+    def test_minimal_valid(self) -> None:
+        g = GrainTransportObservation(
+            snapshot_date=date(2026, 8, 18),
+            series="downbound_grain_barge_rates",
+            resource_id="deqi-uken",
+            metric="barge_rate_pct_of_benchmark",
+            value=765.0,
+        )
+        assert g.source == "usda_gtr"
+        assert isinstance(g.ingested_at, datetime)
+
+    def test_negative_value_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            GrainTransportObservation(
+                snapshot_date=date(2026, 8, 18),
+                series="mississippi_barge_rates",
+                resource_id="7spn-fbua",
+                metric="barge_rate_per_ton",
+                value=-1.0,
+            )
+
+    def test_batch(self) -> None:
+        batch = GrainTransportObservationBatch(
+            records=[
+                GrainTransportObservation(
+                    snapshot_date=date(2026, 8, 18),
+                    series="grain_inspections",
+                    resource_id="sruw-w49i",
+                    metric="grain_inspected",
+                    value=1.0,
+                )
+            ]
+        )
+        assert batch.count == 1
+        assert batch.source == "usda_gtr"
+
+
+class TestFMCContainerStats:
+    def test_minimal_valid(self) -> None:
+        f = FMCContainerStats(
+            snapshot_date=date(2024, 3, 31),
+            quarter_label="Q1 2024",
+            year=2024,
+            quarter=1,
+            entity_type="port",
+            entity_name="Anchorage, Alaska",
+        )
+        assert f.source == "fmc"
+        assert isinstance(f.ingested_at, datetime)
+
+    def test_quarter_bounds_enforced(self) -> None:
+        with pytest.raises(ValidationError):
+            FMCContainerStats(
+                snapshot_date=date(2024, 3, 31),
+                quarter_label="Q5 2024",
+                year=2024,
+                quarter=5,
+                entity_type="port",
+                entity_name="Nowhere",
+            )
+
+    def test_negative_teu_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            FMCContainerStats(
+                snapshot_date=date(2024, 3, 31),
+                quarter_label="Q1 2024",
+                year=2024,
+                quarter=1,
+                entity_type="carrier",
+                entity_name="CMACGM",
+                laden_export_teu=-5,
+            )
+
+    def test_batch(self) -> None:
+        batch = FMCContainerStatsBatch(
+            records=[
+                FMCContainerStats(
+                    snapshot_date=date(2024, 3, 31),
+                    quarter_label="Q1 2024",
+                    year=2024,
+                    quarter=1,
+                    entity_type="carrier",
+                    entity_name="CMACGM",
+                )
+            ]
+        )
+        assert batch.count == 1
+        assert batch.source == "fmc"

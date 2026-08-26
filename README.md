@@ -8,12 +8,12 @@ Multi-source data pipeline that ingests, normalizes, and stores freight rail and
 ocean container shipping data. Outputs Parquet and CSV files suitable for
 datalake ingestion (Iceberg-compatible schema design).
 
-Ten public sources, each with its own idea of what a date is, what a region is, and
+Twelve public sources, each with its own idea of what a date is, what a region is, and
 how often anything updates, land in one normalized store you can actually join across.
 
 ## What's in the store
 
-Current local build, 51 million rows across 10 tables:
+Current local build, 52 million rows across 11 tables:
 
 | Table | Rows | What it is |
 |---|---:|---|
@@ -22,6 +22,8 @@ Current local build, 51 million rows across 10 tables:
 | `motor_carrier_census` | 2,085,534 | Motor carrier registrations, the universe table |
 | `rail_service_metrics` | 1,553,679 | Speed, dwell, and cars-on-line by railroad |
 | `rail_safety_incidents` | 952,160 | FRA accident and incident reports |
+| `fmc_containerized` | 535 | FMC quarterly US port / ocean-carrier laden & empty TEU plus tonnage |
+| `grain_transport` | 659,100 | USDA GTR grain barge/truck/ocean rates, barge tonnage, export inspections |
 | `rail_carloadings` | 199,286 | Carloads by railroad and commodity |
 | `freight_indicators` | 25,632 | Truck spot rates, intermodal, ocean container rates |
 | `rail_tariff_rates` | 6,802 | Published tariff rates by lane and commodity |
@@ -37,6 +39,8 @@ That constraint is the reason the table is small, not a bug.
 | Source | Data | Access | Frequency |
 |--------|------|--------|-----------|
 | **USDA AgTransport** | Rail carloadings by commodity, rail service metrics (speed/dwell/cars-on-line), rail tariff rates | Public Socrata API (free, no key required) | Weekly |
+| **USDA GTR Grain Datasets** | Barge rates + downbound tonnage (Mississippi River System), quarterly grain truck rates, ocean vessel/container rates, FGIS export inspections | Public Socrata API (same AgTransport domain, free) | Weekly (truck quarterly) |
+| **FMC Containerized Freight Statistics** | Quarterly laden/empty TEU + tonnage by US port and ocean carrier (VOCC), OSRA 2022 collection | Public XLSX downloads scraped from fmc.gov (free, no key) | Quarterly, ~2-4 quarter lag |
 | **Freightos Baltic Index (FBX)** | Ocean container spot rates on 12 major trade lanes | Public API (free tier) | Daily/weekly |
 | **BTS Freight Indicators** | Truck spot rates (DAT), rail carloads/intermodal, train speed/dwell, ocean container rates | Public Socrata API (free, no key) | Weekly/monthly |
 | **FRA Safety Data** | Rail accidents/incidents (Form 54/57) | Public Socrata API (free, no key) | Monthly |
@@ -53,6 +57,8 @@ That constraint is the reason the table is small, not a bug.
 
 ```
 USDA Socrata API ─┐
+USDA GTR grain ───┤
+FMC containerized ┤
 BTS Freight Inds ─┤
 FRA Safety ───────┤
 FMCSA Census ─────┼──► Normalizer ──► Storage ──► Parquet/CSV
@@ -75,7 +81,7 @@ source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
 
 # Run the pipeline
-freight-pipe run --sources usda,fbx,bts,fra,fmcsa,eurostat,fred
+freight-pipe run --sources usda,usda_gtr,fbx,bts,fra,fmcsa,eurostat,fred
 
 # Launch the dashboard
 freight-pipe dashboard
@@ -95,6 +101,8 @@ src/freight_rail_pipeline/
 ├── sources/
 │   ├── base.py          # Abstract source interface
 │   ├── usda_agtransport.py
+│   ├── usda_gtr.py
+│   ├── fmc_containerized.py
 │   ├── freightos_fbx.py
 │   ├── bts_freight_indicators.py
 │   ├── fra_safety.py
@@ -118,7 +126,7 @@ src/freight_rail_pipeline/
 pytest
 ```
 
-140 tests at 76% line coverage, run on every push and pull request via GitHub Actions.
+218 tests at 77% line coverage, run on every push and pull request via GitHub Actions.
 Source adapters are tested against recorded fixtures, including the AAR press-release
 PDF, so a parser regression shows up in CI rather than as a quietly malformed table.
 

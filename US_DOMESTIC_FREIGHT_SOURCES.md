@@ -29,7 +29,7 @@ Verdict key:
 | **FRA Safety Data** | data.transportation.gov Socrata + OData/ArcGIS APIs | Yes | Decades (accidents to 1975+) | Monthly | **GO** |
 | **EIA API v2** | REST + free API key | Yes | 2000s+ by series | Weekly/monthly | **GO** |
 | **EIA rail crude movements** | (former series) | — | Discontinued Oct 2025 | — | **NO-GO** |
-| **USDA Grain Transportation Report** | Weekly PDF + GTR datasets page | Yes | 2000s+ | Weekly | **GO** |
+| **USDA Grain Transportation Report** | AgTransport Socrata grain datasets | Yes | 2000s+ | Weekly | **GO** (built 2026-08-25) |
 | **FRED** | REST API, free key | Yes | Decades | Monthly/weekly | **GO** |
 | **BLS PPI** | API (key) + FRED tags | Yes | Decades (1947+ for some) | Monthly | **GO** |
 | **USACE/WCSC barge data** | ContentDM file downloads | Yes | 2000–2016+ | Annual | **SPIKE** |
@@ -131,7 +131,16 @@ Verdict key:
 - Data: grain barge rates, rail rates/carloads, ocean rates, truck rates for grains.
 - Access: PDF weekly + dataset download page; grain datasets/dashboards also on AgTransport Socrata (`agtransport.usda.gov/browse?q=grain`).
 - Backfill: 2000s+.
-- Verdict: **GO** — same Socrata domain as the existing USDA source; add grain datasets alongside the existing rail carloadings.
+- **Built 2026-08-25** (spike verified the AgTransport domain is still fully live — all four existing resource IDs plus the GTR grain datasets return rows; note its datasets no longer appear in the federated Socrata catalog search, so discovery goes through `agtransport.usda.gov/data.json`, which lists 150 datasets with identifiers). `sources/usda_gtr.py` ingests seven GTR datasets into one long-format table `grain_transport` (model `GrainTransportObservation`: series/metric/location/origin/destination/commodity/value/units):
+  - Mississippi River System Downbound Grain Barge Per Ton Rates — `7spn-fbua`
+  - Downbound Grain Barge Rates (% of benchmark) — `deqi-uken`
+  - Container Ocean Freight Rates (Chicago–Shanghai etc.) — `dtp5-fwp8`
+  - Vessel Rates (Gulf/PNW to Japan) — `ehs5-yac3` (one row carries three rate columns; expanded to three observations)
+  - Quarterly Grain Truck Rates — `fxkn-2w9c`
+  - Downbound Barge Grain Movements (Tons) by lock — `n4pw-9ygw`
+  - Grain Inspections (FGIS export inspections, metric tons) — `sruw-w49i`
+  - Full-history smoke run 2026-08-25: **659,100 rows** (grain inspections dominates). Weekly cadence; keyless (uses `USDA_SOCRATA_APP_TOKEN` if set).
+- Verdict: **GO — built**. Same Socrata domain as the existing USDA source; reuses the same client pattern.
 
 ### 7. FRED (St. Louis Fed)
 
@@ -183,10 +192,19 @@ Verdict key:
 
 ### 12. FMC Containerized Freight Statistics
 
-- URL: `fmc.gov/what-we-do/containerized-freight-statistics/`; quarterly XLSX (e.g. `https://www.fmc.gov/wp-content/uploads/2026/08/CFS_2025_Data.xlsx`).
-- Data: quarterly US import/export container counts by trade lane, all US ports.
-- Access: direct XLSX download, no key. Need a library (openpyxl) to parse.
-- Verdict: **GO** (spike on xlsx parsing).
+- URL: landing page `https://www.fmc.gov/databases-and-publications/containerized-freight-statistics/`;
+  per-year workbooks like `https://www.fmc.gov/wp-content/uploads/2026/02/CFS_2024_Data.xlsx`
+  (upload month in the path is unpredictable — discover links from the page each run).
+  Revisions appear as `CFS_<year>_Data-updated.xlsx`.
+- Data (verified live 2026-08-25, both sheets, Q1 2024 onward): quarterly
+  Laden/Empty Exports + Imports TEU and Export/Import Tonnage by US port (~39) and
+  ocean carrier (~30 VOCCs). NOT port-pair/route or commodity level. Carrier
+  self-reported per FMC disclaimer; public domain.
+- Access: direct XLSX download, no key, robots.txt open, no bot-blocking observed.
+  Parsed with pandas + openpyxl (`sources/fmc_containerized.py` -> `fmc_containerized`).
+- Cadence: quarterly PDFs + annual full-year XLSX; publication lag ~2-4 quarters
+  (Q1 2024 first posted July 2025). Coverage starts Q1 2024 (new OSRA 2022 collection).
+- Verdict: **GO** — built. Live smoke 2026-08-25: 535 rows across 8 quarters (2024-2025).
 
 ### 13. Census International Trade (key-gated)
 
@@ -251,7 +269,7 @@ Verdict key:
 8. **UN Comtrade** — key registration (free tier).
 9. **FMC quarterly XLSX** — parse + schedule quarterly.
 10. **STB Rail Service Metrics** via AgTransport Socrata dataset `axkm-yjzy`.
-11. **USDA GTR grain datasets** on AgTransport.
+11. **USDA GTR grain datasets** on AgTransport. **DONE 2026-08-25** (`usda_gtr` → `grain_transport`)
 12. Spikes: USA Trade Online, FMCSA, USACE/WCSC, maritime AIS.
 
 ## Built 2026-08-12 (keyless freight rail sources)

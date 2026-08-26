@@ -9,6 +9,10 @@ import pytest
 
 from freight_rail_pipeline.config import PipelineConfig
 from freight_rail_pipeline.models.schemas import (
+    FMCContainerStats,
+    FMCContainerStatsBatch,
+    GrainTransportObservation,
+    GrainTransportObservationBatch,
     OceanFreightRate,
     OceanFreightRateBatch,
     RailCarloading,
@@ -329,3 +333,95 @@ class TestStorageWriter:
 
         df = pd.read_parquet(list(self._test_dir.rglob("waybill_shipments.parquet"))[0])
         assert len(df) == 1, "re-fetched record deduped to a single row"
+
+    def test_write_grain_transport_creates_parquet_and_csv(self) -> None:
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+        batch = GrainTransportObservationBatch(
+            records=[
+                GrainTransportObservation(
+                    snapshot_date=date(2026, 8, 18),
+                    series="mississippi_barge_rates",
+                    resource_id="7spn-fbua",
+                    metric="barge_rate_per_ton",
+                    location="La Crosse - Minneapolis",
+                    value=47.3535,
+                    units="$ per ton",
+                ),
+                GrainTransportObservation(
+                    snapshot_date=date(2026, 7, 1),
+                    series="vessel_rates",
+                    resource_id="ehs5-yac3",
+                    metric="ocean_vessel_rate",
+                    location="Gulf to Japan",
+                    value=68.95,
+                    units="$ per metric ton",
+                ),
+            ]
+        )
+        written = writer.write_grain_transport(batch, dt=date(2026, 8, 25))
+        assert written == 2
+
+        files = list(self._test_dir.rglob("grain_transport.parquet"))
+        assert len(files) == 2, "one day partition per distinct snapshot_date"
+        barge_file = next(
+            f
+            for f in files
+            if f.parts[-4] == "year=2026"
+            and f.parent.name == "day=18"
+        )
+        df = pd.read_parquet(barge_file)
+        assert len(df) == 1
+        assert df["series"].iloc[0] == "mississippi_barge_rates"
+        assert list(self._test_dir.rglob("grain_transport.csv")), "CSV fallback written"
+
+    def test_write_grain_transport_empty_batch_does_nothing(self) -> None:
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+        assert writer.write_grain_transport(GrainTransportObservationBatch(records=[])) == 0
+        assert not list(self._test_dir.rglob("grain_transport.parquet"))
+
+    def test_write_fmc_containerized_creates_parquet_and_csv(self) -> None:
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+        batch = FMCContainerStatsBatch(
+            records=[
+                FMCContainerStats(
+                    snapshot_date=date(2024, 3, 31),
+                    quarter_label="Q1 2024",
+                    year=2024,
+                    quarter=1,
+                    entity_type="port",
+                    entity_name="Anchorage, Alaska",
+                    laden_export_teu=3548,
+                    empty_export_teu=132,
+                    laden_import_teu=12,
+                    empty_import_teu=5928,
+                    export_tonnage=49266.0,
+                    import_tonnage=5963.0,
+                ),
+                FMCContainerStats(
+                    snapshot_date=date(2024, 6, 30),
+                    quarter_label="Q2 2024",
+                    year=2024,
+                    quarter=2,
+                    entity_type="carrier",
+                    entity_name="CMACGM",
+                    laden_export_teu=456525,
+                ),
+            ]
+        )
+        written = writer.write_fmc_containerized(batch, dt=date(2026, 8, 25))
+        assert written == 2
+
+        files = list(self._test_dir.rglob("fmc_containerized.parquet"))
+        assert len(files) == 2, "one day partition per quarter-end snapshot_date"
+        df = pd.read_parquet(files[0])
+        assert df["entity_type"].iloc[0] in ("port", "carrier")
+        assert list(self._test_dir.rglob("fmc_containerized.csv")), "CSV fallback written"
+
+    def test_write_fmc_containerized_empty_batch_does_nothing(self) -> None:
+        config = PipelineConfig(output_dir=str(self._test_dir))
+        writer = StorageWriter(config)
+        assert writer.write_fmc_containerized(FMCContainerStatsBatch(records=[])) == 0
+        assert not list(self._test_dir.rglob("fmc_containerized.parquet"))

@@ -626,3 +626,180 @@ class TestAARWeeklyNormalizer:
         raw = {"region": "US", "category": "Coal"}
         result = DataNormalizer.normalize_aar_weekly(raw)
         assert result is None
+
+
+class TestGrainObservationNormalizer:
+    def test_barge_rate_per_ton(self) -> None:
+        raw = {
+            "date": "2026-08-18T00:00:00.000",
+            "river_system_location": "La Crosse - Minneapolis",
+            "price_per_ton": "47.3535",
+        }
+        result = DataNormalizer.normalize_grain_observation(raw, "mississippi_barge_rates")
+        assert result is not None
+        assert result.metric == "barge_rate_per_ton"
+        assert result.value == 47.3535
+        assert result.location == "La Crosse - Minneapolis"
+        assert result.units == "$ per ton"
+        assert result.snapshot_date == date(2026, 8, 18)
+        assert result.source == "usda_gtr"
+
+    def test_barge_rate_pct_of_benchmark_keeps_week(self) -> None:
+        raw = {"date": "2026-08-18T00:00:00.000", "location": "Twin Cities", "rate": "765"}
+        result = DataNormalizer.normalize_grain_observation(raw, "downbound_grain_barge_rates")
+        assert result is not None
+        assert result.metric == "barge_rate_pct_of_benchmark"
+        assert result.units == "% of benchmark"
+        assert result.week_number is None
+
+        raw["week"] = "33"
+        with_week = DataNormalizer.normalize_grain_observation(
+            raw, "downbound_grain_barge_rates"
+        )
+        assert with_week is not None
+        assert with_week.week_number == 33
+
+    def test_container_ocean_freight_route_fields(self) -> None:
+        raw = {
+            "date": "2026-07-01T00:00:00.000",
+            "container_size": "20ft container",
+            "origin": "U.S. Mid West (Chicago)",
+            "destination_country": "Shanghai",
+            "rate": "1551",
+        }
+        result = DataNormalizer.normalize_grain_observation(
+            raw, "container_ocean_freight_rates"
+        )
+        assert result is not None
+        assert result.origin == "U.S. Mid West (Chicago)"
+        assert result.destination == "Shanghai"
+        assert result.container_type == "20ft container"
+        assert result.units == "$ per container"
+
+    def test_vessel_rate_requires_known_value_field(self) -> None:
+        raw = {"date": "2026-07-01T00:00:00.000", "gulf_to_japan": "68.95"}
+        assert DataNormalizer.normalize_grain_observation(raw, "vessel_rates") is None
+        bad = DataNormalizer.normalize_grain_observation(
+            raw, "vessel_rates", value_field="not_a_column"
+        )
+        assert bad is None
+        good = DataNormalizer.normalize_grain_observation(
+            raw, "vessel_rates", value_field="gulf_to_japan"
+        )
+        assert good is not None
+        assert good.location == "Gulf to Japan"
+        assert good.value == 68.95
+
+    def test_truck_rate_quarter_label(self) -> None:
+        raw = {
+            "yearquarter": "2026Q1",
+            "region": "National",
+            "rate_mile_trukload": "6.83",
+        }
+        result = DataNormalizer.normalize_grain_observation(raw, "quarterly_grain_truck_rates")
+        assert result is not None
+        assert result.quarter == "2026Q1"
+        assert result.location == "National"
+        assert result.units == "$ per mile"
+
+    def test_barge_movements_tons(self) -> None:
+        raw = {
+            "date": "2026-08-15T00:00:00.000",
+            "commodity": "Corn",
+            "lock": "IL La Grange",
+            "tons": "133600",
+        }
+        result = DataNormalizer.normalize_grain_observation(
+            raw, "downbound_barge_grain_movements"
+        )
+        assert result is not None
+        assert result.metric == "downbound_grain_barge_tons"
+        assert result.commodity == "Corn"
+        assert result.location == "IL La Grange"
+
+    def test_inspection_metric_tons(self) -> None:
+        raw = {
+            "date": "2026-08-20T00:00:00.000",
+            "port": "New Orleans",
+            "grain": "Corn",
+            "mt": "12345.6",
+        }
+        result = DataNormalizer.normalize_grain_observation(raw, "grain_inspections")
+        assert result is not None
+        assert result.metric == "grain_inspected"
+        assert result.units == "metric tons"
+
+    def test_missing_value_returns_none(self) -> None:
+        raw = {"river_system_location": "La Crosse - Minneapolis"}
+        assert (
+            DataNormalizer.normalize_grain_observation(raw, "mississippi_barge_rates") is None
+        )
+
+    def test_unknown_series_returns_none(self) -> None:
+        assert DataNormalizer.normalize_grain_observation({"value": "1"}, "nope") is None
+
+
+class TestFMCContainerNormalizer:
+    PORT_ROW = {
+        "Quarter, Year": "Q1 2024",
+        "Port Name": "Anchorage, Alaska",
+        "Laden Exports": 3548,
+        "Empty Exports": 132,
+        "Laden Imports": 12,
+        "Empty Imports": 5928,
+        "Export Tonnage": 49266,
+        "Import Tonnage": 5963,
+    }
+
+    def test_port_row_full(self) -> None:
+        result = DataNormalizer.normalize_fmc_container(self.PORT_ROW, "port")
+        assert result is not None
+        assert result.snapshot_date == date(2024, 3, 31)
+        assert result.quarter_label == "Q1 2024"
+        assert result.year == 2024
+        assert result.quarter == 1
+        assert result.entity_type == "port"
+        assert result.entity_name == "Anchorage, Alaska"
+        assert result.laden_export_teu == 3548
+        assert result.empty_import_teu == 5928
+        assert result.export_tonnage == 49266.0
+
+    def test_quarter_end_dates(self) -> None:
+        row = dict(self.PORT_ROW, **{"Quarter, Year": "Q4 2025"})
+        result = DataNormalizer.normalize_fmc_container(row, "port")
+        assert result is not None
+        assert result.snapshot_date == date(2025, 12, 31)
+
+    def test_carrier_entity_name_column(self) -> None:
+        row = {
+            "Quarter, Year": "Q1 2024",
+            "Carrier Name": "CMACGM",
+            "Laden Exports": 456525,
+        }
+        result = DataNormalizer.normalize_fmc_container(row, "carrier")
+        assert result is not None
+        assert result.entity_name == "CMACGM"
+        assert result.laden_import_teu is None
+
+    def test_blank_teus_with_tonnage_kept(self) -> None:
+        row = {
+            "Quarter, Year": "Q2 2024",
+            "Port Name": "Boston, Massachusetts",
+            "Export Tonnage": 172132,
+        }
+        result = DataNormalizer.normalize_fmc_container(row, "port")
+        assert result is not None
+        assert result.laden_export_teu is None
+        assert result.export_tonnage == 172132.0
+
+    def test_all_measures_blank_returns_none(self) -> None:
+        row = {"Quarter, Year": "Q2 2024", "Port Name": "Nowhere"}
+        assert DataNormalizer.normalize_fmc_container(row, "port") is None
+
+    def test_bad_quarter_label_returns_none(self) -> None:
+        row = dict(self.PORT_ROW, **{"Quarter, Year": "early 2024"})
+        assert DataNormalizer.normalize_fmc_container(row, "port") is None
+
+    def test_missing_entity_name_returns_none(self) -> None:
+        row = {"Quarter, Year": "Q1 2024"}
+        assert DataNormalizer.normalize_fmc_container(row, "carrier") is None

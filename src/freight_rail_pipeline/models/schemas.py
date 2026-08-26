@@ -489,6 +489,91 @@ class AARWeeklyTrafficBatch(BaseModel):
         return len(self.records)
 
 
+class GrainTransportObservation(BaseModel):
+    """One dated observation from a USDA Grain Transportation Report (GTR)
+    dataset on AgTransport Socrata. The GTR series span modes (barge rates and
+    tonnage, grain truck rates, ocean vessel/container rates, export grain
+    inspections), so they land in one long-format table: `series` names the
+    dataset slug, `metric` the normalized measure, and mode-specific dimensions
+    (lock/port/route region, origin-destination lane, commodity) are nullable.
+    Rates arrive as strings from Socrata and are coerced here."""
+
+    source: str = Field(default="usda_gtr")
+    snapshot_date: date = Field(..., description="Week/month/quarter the observation reports on")
+    series: str = Field(..., description="GTR dataset slug, e.g. 'downbound_grain_barge_rates'")
+    resource_id: str = Field(..., description="AgTransport Socrata 4x4 the row came from")
+    metric: str = Field(
+        ...,
+        description=(
+            "Normalized measure, e.g. barge_rate_per_ton, ocean_vessel_rate, "
+            "grain_inspected"
+        ),
+    )
+    location: str | None = Field(
+        default=None,
+        description="River segment / barge market / lock / region / port",
+    )
+    origin: str | None = Field(
+        default=None, description="Origin for route-priced series (container lanes)"
+    )
+    destination: str | None = Field(
+        default=None, description="Destination country/city for route-priced series"
+    )
+    commodity: str | None = Field(default=None, description="Grain commodity where reported")
+    container_type: str | None = Field(
+        default=None, description="Container size, e.g. '20ft container'"
+    )
+    value: float = Field(..., ge=0, description="Observed rate (USD) or tonnage")
+    units: str | None = Field(default=None, description="Unit of the value, e.g. '$ per ton'")
+    week_number: int | None = Field(default=None, ge=1, le=53, description="GTR reporting week")
+    year: int | None = Field(default=None, description="Reporting year")
+    quarter: str | None = Field(default=None, description="Quarter label, e.g. '2026Q1'")
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class GrainTransportObservationBatch(BaseModel):
+    records: list[GrainTransportObservation]
+    source: str = "usda_gtr"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+class FMCContainerStats(BaseModel):
+    """One quarterly cell-group from the FMC Containerized Freight Statistics
+    database (OSRA 2022 collection, 46 U.S.C. 41110): a US port's or an ocean
+    carrier's laden/empty export and import TEU plus export/import tonnage for
+    one quarter. Coverage starts Q1 2024; figures are carrier self-reported.
+    snapshot_date is the quarter-end date so day partitions align per quarter."""
+
+    source: str = Field(default="fmc")
+    snapshot_date: date = Field(..., description="Quarter-end date, e.g. 2024-03-31")
+    quarter_label: str = Field(..., description="Raw label from the workbook, e.g. 'Q1 2024'")
+    year: int = Field(..., description="Reporting year")
+    quarter: int = Field(..., ge=1, le=4, description="Calendar quarter number")
+    entity_type: str = Field(..., description="'port' or 'carrier'")
+    entity_name: str = Field(..., description="US port name or VOCC carrier name")
+    laden_export_teu: int | None = Field(default=None, ge=0)
+    empty_export_teu: int | None = Field(default=None, ge=0)
+    laden_import_teu: int | None = Field(default=None, ge=0)
+    empty_import_teu: int | None = Field(default=None, ge=0)
+    export_tonnage: float | None = Field(default=None, ge=0)
+    import_tonnage: float | None = Field(default=None, ge=0)
+    raw_record: dict[str, Any] | None = Field(default=None)
+    ingested_at: datetime = Field(default_factory=_utcnow)
+
+
+class FMCContainerStatsBatch(BaseModel):
+    records: list[FMCContainerStats]
+    source: str = "fmc"
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
 class PipelineRunSummary(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     started_at: datetime = Field(...)

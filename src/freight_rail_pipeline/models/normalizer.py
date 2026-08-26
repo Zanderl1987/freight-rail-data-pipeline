@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import calendar
 import logging
+import math
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -8,7 +11,9 @@ from typing import Any
 from .schemas import (
     AARWeeklyTraffic,
     EurostatRailFreight,
+    FMCContainerStats,
     FreightIndicator,
+    GrainTransportObservation,
     MotorCarrierCensus,
     OceanFreightRate,
     RailCarloading,
@@ -663,6 +668,186 @@ class DataNormalizer:
             )
         except (ValueError, TypeError, KeyError) as exc:
             log.warning("Failed to normalize AAR weekly row: %s | raw=%s", exc, raw)
+            return None
+
+    # GTR vessel-rate columns -> (location label, value field). One row of
+    # ehs5-yac3 carries three rate series, so the source expands it by calling
+    # normalize_grain_observation once per value field.
+    VESSEL_RATE_FIELDS: dict[str, tuple[str, str]] = {
+        "gulf_to_japan": ("Gulf to Japan", "gulf_to_japan"),
+        "pnw_to_japan": ("PNW to Japan", "pnw_to_japan"),
+        "gulf_pnw_spread": ("Gulf minus PNW spread", "gulf_pnw_spread"),
+    }
+
+    @staticmethod
+    def _grain_week(raw: dict[str, Any]) -> int | None:
+        week = raw.get("week")
+        if week in (None, ""):
+            return None
+        try:
+            return int(week)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def normalize_grain_observation(
+        raw: dict[str, Any],
+        series: str,
+        value_field: str | None = None,
+    ) -> GrainTransportObservation | None:
+        """Normalize one row from a USDA GTR AgTransport dataset. `series` is the
+        dataset slug from config.usda_gtr_resource_ids; `value_field` is only used
+        for the vessel_rates series (one row carries three rate columns)."""
+        try:
+            record_date = DataNormalizer._parse_date(raw.get("date"))
+            year = DataNormalizer._safe_int(raw.get("year"))
+            week_number = DataNormalizer._grain_week(raw)
+            quarter = str(raw.get("yearquarter") or "").strip() or None
+
+            location: str | None = None
+            origin: str | None = None
+            destination: str | None = None
+            commodity: str | None = None
+            container_type: str | None = None
+            units: str | None = None
+            metric: str
+            value_raw: Any
+
+            if series == "mississippi_barge_rates":
+                metric = "barge_rate_per_ton"
+                location = raw.get("river_system_location")
+                value_raw = raw.get("price_per_ton")
+                units = "$ per ton"
+            elif series == "downbound_grain_barge_rates":
+                metric = "barge_rate_pct_of_benchmark"
+                location = raw.get("location")
+                value_raw = raw.get("rate")
+                units = "% of benchmark"
+            elif series == "container_ocean_freight_rates":
+                metric = "container_ocean_freight_rate"
+                origin = raw.get("origin")
+                destination = raw.get("destination_country")
+                container_type = raw.get("container_size")
+                value_raw = raw.get("rate")
+                units = "$ per container"
+            elif series == "vessel_rates":
+                if value_field not in DataNormalizer.VESSEL_RATE_FIELDS:
+                    return None
+                metric = "ocean_vessel_rate"
+                location, value_field = DataNormalizer.VESSEL_RATE_FIELDS[value_field]
+                value_raw = raw.get(value_field)
+                units = "$ per metric ton"
+            elif series == "quarterly_grain_truck_rates":
+                metric = "grain_truck_rate"
+                location = raw.get("region")
+                value_raw = raw.get("rate_mile_trukload")
+                units = "$ per mile"
+            elif series == "downbound_barge_grain_movements":
+                metric = "downbound_grain_barge_tons"
+                location = raw.get("lock")
+                commodity = raw.get("commodity")
+                value_raw = raw.get("tons")
+                units = "tons"
+            elif series == "grain_inspections":
+                metric = "grain_inspected"
+                location = raw.get("port")
+                commodity = raw.get("grain")
+                value_raw = raw.get("mt")
+                units = "metric tons"
+            else:
+                log.warning("Unknown USDA GTR series %r; record dropped", series)
+                return None
+
+            value = DataNormalizer._safe_float(value_raw)
+            if value is None:
+                return None
+
+            return GrainTransportObservation(
+                snapshot_date=record_date or date.today(),
+                series=series,
+                resource_id=str(raw.get("_resource_id", "")),
+                metric=metric,
+                location=location,
+                origin=origin,
+                destination=destination,
+                commodity=commodity,
+                container_type=container_type,
+                value=value,
+                units=units,
+                week_number=week_number,
+                year=year,
+                quarter=quarter,
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to normalize grain observation (%s): %s | raw=%s", series, exc, raw)
+            return None
+
+    _FMC_QUARTER_RE = re.compile(r"^Q([1-4])\s+(\d{4})$")
+
+    _FMC_TEU_FIELDS: dict[str, str] = {
+        "Laden Exports": "laden_export_teu",
+        "Empty Exports": "empty_export_teu",
+        "Laden Imports": "laden_import_teu",
+        "Empty Imports": "empty_import_teu",
+    }
+
+    @staticmethod
+    def normalize_fmc_container(
+        raw: dict[str, Any], entity_type: str
+    ) -> FMCContainerStats | None:
+        """Normalize one data row from an FMC Containerized Freight Statistics
+        XLSX ('US Ports' or 'Ocean Carriers' sheet). `entity_type` is 'port' or
+        'carrier' matching the sheet. TEU cells arrive as ints or blanks;
+        tonnage as ints/floats or blanks."""
+        try:
+            label = str(raw.get("Quarter, Year") or "").strip()
+            match = DataNormalizer._FMC_QUARTER_RE.match(label)
+            if not match:
+                log.warning("Unparseable FMC quarter label %r; record dropped", label)
+                return None
+            quarter, year = int(match.group(1)), int(match.group(2))
+            name_col = "Port Name" if entity_type == "port" else "Carrier Name"
+            entity_name = str(raw.get(name_col) or "").strip()
+            if not entity_name:
+                return None
+            snapshot = date(year, 3 * quarter, calendar.monthrange(year, 3 * quarter)[1])
+
+            teus: dict[str, int | None] = {}
+            for column, field_name in DataNormalizer._FMC_TEU_FIELDS.items():
+                teus[field_name] = DataNormalizer._safe_int(raw.get(column))
+
+            export_tonnage = DataNormalizer._safe_float(raw.get("Export Tonnage"))
+            import_tonnage = DataNormalizer._safe_float(raw.get("Import Tonnage"))
+            # Blank Excel cells arrive as float('nan') through pandas; _safe_float
+            # passes NaN through, so drop it here rather than trip ge=0.
+            if export_tonnage is not None and math.isnan(export_tonnage):
+                export_tonnage = None
+            if import_tonnage is not None and math.isnan(import_tonnage):
+                import_tonnage = None
+            has_teu = any(v is not None for v in teus.values())
+            if not has_teu and export_tonnage is None and import_tonnage is None:
+                return None
+
+            return FMCContainerStats(
+                snapshot_date=snapshot,
+                quarter_label=label,
+                year=year,
+                quarter=quarter,
+                entity_type=entity_type,
+                entity_name=entity_name,
+                laden_export_teu=teus["laden_export_teu"],
+                empty_export_teu=teus["empty_export_teu"],
+                laden_import_teu=teus["laden_import_teu"],
+                empty_import_teu=teus["empty_import_teu"],
+                export_tonnage=export_tonnage,
+                import_tonnage=import_tonnage,
+                raw_record=raw,
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning(
+                "Failed to normalize FMC container row (%s): %s | raw=%s", entity_type, exc, raw
+            )
             return None
 
     @staticmethod

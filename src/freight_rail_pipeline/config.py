@@ -34,8 +34,22 @@ class PipelineConfig:
             "grain_rail_tariff_rates": "idbx-qf4w",
         }
     )
+    usda_gtr_resource_ids: dict[str, str] = field(
+        default_factory=lambda: {
+            "mississippi_barge_rates": "7spn-fbua",
+            "downbound_grain_barge_rates": "deqi-uken",
+            "container_ocean_freight_rates": "dtp5-fwp8",
+            "vessel_rates": "ehs5-yac3",
+            "quarterly_grain_truck_rates": "fxkn-2w9c",
+            "downbound_barge_grain_movements": "n4pw-9ygw",
+            "grain_inspections": "sruw-w49i",
+        }
+    )
     fbx_base_url: str = "https://api.freightos.com/fd_external_apis/price_stats"
     fbx_api_key: str = ""
+    fmc_stats_page_url: str = (
+        "https://www.fmc.gov/databases-and-publications/containerized-freight-statistics/"
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))
